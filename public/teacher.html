@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Teacher Board</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="main">
+
+  <div id="toolbar">
+    <input type="color" id="color">
+    <button onclick="clearBoard()">Clear</button>
+    <button onclick="saveBoard()">Save</button>
+  </div>
+
+  <canvas id="board"></canvas>
+
+  <div id="chatContainer">
+    <div id="chatBox"></div>
+
+    <div id="chatInput">
+      <input id="msg" placeholder="Type message...">
+      <button onclick="sendMsg()">Send</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="script.js"></script>
+<script src="chat.js"></script>
+
+</body>
+</html>

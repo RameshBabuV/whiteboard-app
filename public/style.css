@@ -1,0 +1,79 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+
+#main {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+#toolbar {
+  background: #2c3e50;
+  padding: 10px;
+}
+
+canvas {
+  flex: 1;
+  border: 2px solid #000;
+}
+
+/* Chat */
+#chatContainer {
+  height: 220px;
+  display: flex;
+  flex-direction: column;
+  background: #f4f4f4;
+  border-top: 2px solid #ccc;
+}
+
+#chatBox {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+/* Message bubble */
+.message {
+  max-width: 70%;
+  padding: 8px 12px;
+  margin: 5px 0;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.teacher {
+  background: #d1ecf1;
+  align-self: flex-end;
+}
+
+.student {
+  background: #ffffff;
+  align-self: flex-start;
+}
+
+.name {
+  font-size: 11px;
+  color: #555;
+  margin-bottom: 2px;
+}
+
+/* Input */
+#chatInput {
+  display: flex;
+  border-top: 1px solid #ccc;
+}
+
+#chatInput input {
+  flex: 1;
+  padding: 10px;
+  border: none;
+}
+
+#chatInput button {
+  padding: 10px;
+  background: #2c3e50;
+  color: white;
+  border: none;
+}
