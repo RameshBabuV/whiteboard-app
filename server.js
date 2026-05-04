@@ -6,8 +6,21 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 const PORT = process.env.PORT || 3000;
+const path = require("path");
 
-app.use(express.static("public"));
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "teacher.html"));
+});
+
+app.get("/teacher.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "teacher.html"));
+});
+
+app.get("/student.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "student.html"));
+});
 
 io.on("connection", (socket) => {
   console.log("User connected");
