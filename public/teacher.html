@@ -10,11 +10,33 @@
 
   <div id="toolbar">
     <input type="color" id="color">
+    <button id="penTool" onclick="setTool('pen')">Pen</button>
+    <button id="textTool" onclick="setTool('text')">Text</button>
+    <button id="imageTool" onclick="setTool('image')">Image</button>
+    <select id="fontFamily">
+      <option value="Arial">Arial</option>
+      <option value="Georgia">Georgia</option>
+      <option value="Times New Roman">Times</option>
+      <option value="Courier New">Courier</option>
+    </select>
+    <input type="number" id="fontSize" value="28" min="10" max="96">
+    <button id="boldText" onclick="toggleTextStyle('bold')">B</button>
+    <button id="italicText" onclick="toggleTextStyle('italic')">I</button>
+    <button id="underlineText" onclick="toggleTextStyle('underline')">U</button>
+    <select id="textAlign">
+      <option value="left">Left</option>
+      <option value="center">Center</option>
+      <option value="right">Right</option>
+    </select>
+    <button onclick="addTextToBoard()">Add Text</button>
+    <button onclick="chooseImage()">Choose Image</button>
+    <input type="file" id="imageInput" accept="image/*">
     <button onclick="clearBoard()">Clear</button>
     <button onclick="saveBoard()">Save</button>
   </div>
 
   <canvas id="board"></canvas>
+  <textarea id="boardTextEditor" placeholder="Paste or type here..."></textarea>
 
   <div id="chatContainer">
     <div id="chatBox"></div>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Login</title>
+</head>
+<body>
+
+<h2>Login with Email</h2>
+
+<input id="email" placeholder="Enter Email"><br><br>
+<button onclick="login()">Send Login Link</button>
+
+<p id="msg"></p>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+
+<script>
+const supabaseClient = supabase.createClient(
+  "https://cfxrsbjvrmdrklkrozxx.supabase.co",
+  "sb_publishable_-yvmuyusNEN5KuSuOx5_iA_6FaGDg3J"
+);
+
+const params = new URLSearchParams(window.location.search);
+const room = params.get("room") || "python";
+
+async function login() {
+  const email = document.getElementById("email").value;
+
+  const { error } = await supabaseClient.auth.signInWithOtp({
+    email: email,
+    options: {
+      emailRedirectTo: window.location.origin + "/student.html?room=" + room
+    }
+  });
+
+  if (error) {
+    alert(error.message);
+  } else {
+    document.getElementById("msg").innerText =
+      "Check your email and click the login link!";
+  }
+}
+</script>
+
+</body>
+</html>

@@ -7,16 +7,64 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  position: relative;
 }
 
 #toolbar {
   background: #2c3e50;
   padding: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+#toolbar button,
+#toolbar input,
+#toolbar select {
+  height: 32px;
+}
+
+#toolbar button {
+  border: none;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #111;
+  cursor: pointer;
+}
+
+#toolbar button.active {
+  background: #f1c40f;
+}
+
+#fontSize {
+  width: 64px;
+}
+
+#imageInput {
+  display: none;
 }
 
 canvas {
   flex: 1;
   border: 2px solid #000;
+  box-sizing: border-box;
+  touch-action: none;
+}
+
+#boardTextEditor {
+  position: absolute;
+  display: none;
+  min-width: 220px;
+  min-height: 80px;
+  padding: 8px;
+  border: 2px solid #2c3e50;
+  background: #ffffff;
+  color: #000000;
+  box-sizing: border-box;
+  resize: both;
+  z-index: 5;
+  outline: none;
 }
 
 /* Chat */
@@ -76,4 +124,41 @@ canvas {
   background: #2c3e50;
   color: white;
   border: none;
+}
+
+.header {
+  text-align: center;
+  padding: 20px;
+  background: #2c3e50;
+  color: white;
+}
+
+.courses {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  padding: 20px;
+}
+
+.card {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  text-align: center;
+}
+
+.btn {
+  display: inline-block;
+  padding: 10px 15px;
+  background: #2c3e50;
+  color: white;
+  text-decoration: none;
+  border-radius: 5px;
+}
+
+footer {
+  text-align: center;
+  padding: 15px;
+  background: #eee;
 }

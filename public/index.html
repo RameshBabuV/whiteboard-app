@@ -1,20 +1,48 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>RS Whiteboard</title>
+  <title>RS Computer Academy</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div id="toolbar">
-  <input type="color" id="color">
-  <button onclick="clearBoard()">Clear</button>
-</div>
+<header class="header">
+  <h1>RS Computer Academy</h1>
+  <p>Learn Programming from Basics to Advanced</p>
+</header>
 
-<canvas id="board"></canvas>
+<section class="courses">
 
-<script src="/socket.io/socket.io.js"></script>
-<script src="script.js"></script>
+  <div class="card">
+    <h2>Python Course</h2>
+    <p>Beginner to Advanced Python Training</p>
+    <a href="/student.html?room=python" class="btn">Join Class</a>
+  </div>
+
+  <div class="card">
+    <h2>Java Course</h2>
+    <p>Core Java + Advanced Concepts</p>
+    <a href="/student.html?room=java" class="btn">Join Class</a>
+  </div>
+
+  <div class="card">
+    <h2>C & C++</h2>
+    <p>Strong Programming Foundations</p>
+    <a href="/student.html?room=cpp" class="btn">Join Class</a>
+  </div>
+
+  <div class="card">
+    <h2>Hadoop</h2>
+    <p>Big Data Training</p>
+    <a href="/student.html?room=hadoop" class="btn">Join Class</a>
+  </div>
+
+</section>
+
+<footer>
+  <p>📞 Contact: +91 7338809171</p>
+  <p>📍 Naidupeta | Gudur | Sullurupeta | Nellore | Tirupathi</p>
+</footer>
 
 </body>
 </html>
