@@ -10,11 +10,22 @@ const imageInput = document.getElementById("imageInput");
 const penToolButton = document.getElementById("penTool");
 const textToolButton = document.getElementById("textTool");
 const imageToolButton = document.getElementById("imageTool");
+const tableToolButton = document.getElementById("tableTool");
+const rectangleToolButton = document.getElementById("rectangleTool");
+const circleToolButton = document.getElementById("circleTool");
+const triangleToolButton = document.getElementById("triangleTool");
 const boldTextButton = document.getElementById("boldText");
 const italicTextButton = document.getElementById("italicText");
 const underlineTextButton = document.getElementById("underlineText");
+const undoBoardButton = document.getElementById("undoBoard");
+const redoBoardButton = document.getElementById("redoBoard");
+const tableRowsInput = document.getElementById("tableRows");
+const tableColsInput = document.getElementById("tableCols");
 
 let boardEvents = [];
+let undoStack = [];
+let redoStack = [];
+const maxHistoryItems = 50;
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
@@ -37,6 +48,10 @@ let lastTextPoint = { x: 0.05, y: 0.08 };
 let lastBoardPoint = { x: 0.05, y: 0.08 };
 let selectedImageId = null;
 let imageInteraction = null;
+let shapeType = "rectangle";
+let shapeInteraction = null;
+let selectedBoardObjectId = null;
+let boardObjectInteraction = null;
 const imageCache = new Map();
 let textStyles = {
   bold: false,
@@ -66,7 +81,7 @@ function makeDrawData(x, y, type = "move") {
 function sendDrawData(data) {
   recordBoardEvent(data);
 
-  if (data.kind === "image") {
+  if (isReplaceableBoardObject(data)) {
     redrawBoard();
   } else {
     drawLine(data);
@@ -80,6 +95,7 @@ canvas.addEventListener("mousedown", (e) => {
   if (role !== "teacher") return;
 
   if (tool === "text") {
+    commitOpenTextEditor();
     setBoardPoint(e.offsetX, e.offsetY);
     setTextPoint(e.offsetX, e.offsetY);
     openTextEditor();
@@ -96,7 +112,8 @@ canvas.addEventListener("mousedown", (e) => {
         mode: isOnImageResizeHandle(image, e.offsetX, e.offsetY) ? "resize" : "move",
         startX: e.offsetX / canvas.width,
         startY: e.offsetY / canvas.height,
-        original: { ...image }
+        original: { ...image },
+        historyRecorded: false
       };
     } else {
       selectedImageId = null;
@@ -106,14 +123,45 @@ canvas.addEventListener("mousedown", (e) => {
     return;
   }
 
+  if (tool === "table") {
+    commitOpenTextEditor();
+    setBoardPoint(e.offsetX, e.offsetY);
+    const table = findBoardObjectAt(e.offsetX, e.offsetY, (event) => event.kind === "table");
+
+    if (table) {
+      startBoardObjectMove(table, e.offsetX, e.offsetY);
+      return;
+    }
+
+    placeTableAtLastPoint();
+    setTool("pen");
+    return;
+  }
+
+  if (tool === "shape") {
+    commitOpenTextEditor();
+    const shape = findBoardObjectAt(e.offsetX, e.offsetY, (event) => event.kind === "shape");
+
+    if (shape) {
+      startBoardObjectMove(shape, e.offsetX, e.offsetY);
+      return;
+    }
+
+    startShape(e.offsetX, e.offsetY);
+    return;
+  }
+
+  commitOpenTextEditor();
   setBoardPoint(e.offsetX, e.offsetY);
   drawing = true;
+  pushUndoSnapshot();
   sendDrawData(makeDrawData(e.offsetX, e.offsetY, "start"));
 });
 canvas.addEventListener("mouseup", stopDrawing);
 canvas.addEventListener("mouseleave", () => {
   stopDrawing();
   stopImageInteraction();
+  stopShapeInteraction(false);
 });
 canvas.addEventListener("mousemove", draw);
 
@@ -125,6 +173,7 @@ canvas.addEventListener("touchstart", (e) => {
   const point = getTouchPoint(e);
 
   if (tool === "text") {
+    commitOpenTextEditor();
     setBoardPoint(point.x, point.y);
     setTextPoint(point.x, point.y);
     openTextEditor();
@@ -141,7 +190,8 @@ canvas.addEventListener("touchstart", (e) => {
         mode: isOnImageResizeHandle(image, point.x, point.y) ? "resize" : "move",
         startX: point.x / canvas.width,
         startY: point.y / canvas.height,
-        original: { ...image }
+        original: { ...image },
+        historyRecorded: false
       };
     } else {
       selectedImageId = null;
@@ -151,19 +201,64 @@ canvas.addEventListener("touchstart", (e) => {
     return;
   }
 
+  if (tool === "table") {
+    commitOpenTextEditor();
+    setBoardPoint(point.x, point.y);
+    const table = findBoardObjectAt(point.x, point.y, (event) => event.kind === "table");
+
+    if (table) {
+      startBoardObjectMove(table, point.x, point.y);
+      return;
+    }
+
+    placeTableAtLastPoint();
+    setTool("pen");
+    return;
+  }
+
+  if (tool === "shape") {
+    commitOpenTextEditor();
+    const shape = findBoardObjectAt(point.x, point.y, (event) => event.kind === "shape");
+
+    if (shape) {
+      startBoardObjectMove(shape, point.x, point.y);
+      return;
+    }
+
+    startShape(point.x, point.y);
+    return;
+  }
+
+  commitOpenTextEditor();
   setBoardPoint(point.x, point.y);
   drawing = true;
 
+  pushUndoSnapshot();
   sendDrawData(makeDrawData(point.x, point.y, "start"));
 });
-canvas.addEventListener("touchend", stopDrawing);
+canvas.addEventListener("touchend", () => {
+  stopDrawing();
+  stopShapeInteraction(true);
+});
 canvas.addEventListener("touchmove", touchDraw);
 
 function draw(e) {
   if (role !== "teacher") return;
 
+  setBoardPoint(e.offsetX, e.offsetY);
+
   if (tool === "image" && imageInteraction) {
     updateSelectedImage(e.offsetX, e.offsetY);
+    return;
+  }
+
+  if (tool === "shape" && shapeInteraction) {
+    updateShapePreview(e.offsetX, e.offsetY);
+    return;
+  }
+
+  if (boardObjectInteraction) {
+    updateBoardObjectMove(e.offsetX, e.offsetY);
     return;
   }
 
@@ -193,6 +288,20 @@ function touchDraw(e) {
     return;
   }
 
+  if (tool === "shape" && shapeInteraction) {
+    e.preventDefault();
+    const point = getTouchPoint(e);
+    updateShapePreview(point.x, point.y);
+    return;
+  }
+
+  if (boardObjectInteraction) {
+    e.preventDefault();
+    const point = getTouchPoint(e);
+    updateBoardObjectMove(point.x, point.y);
+    return;
+  }
+
   if (tool !== "pen") return;
   if (!drawing) return;
 
@@ -204,6 +313,12 @@ function touchDraw(e) {
 
 function stopDrawing() {
   stopImageInteraction();
+  stopBoardObjectMove();
+
+  if (tool === "shape" && shapeInteraction) {
+    stopShapeInteraction(true);
+    return;
+  }
 
   if (role !== "teacher" || !drawing) return;
 
@@ -219,6 +334,16 @@ function drawLine(data) {
 
   if (data.kind === "image") {
     drawImage(data);
+    return;
+  }
+
+  if (data.kind === "table") {
+    drawTable(data);
+    return;
+  }
+
+  if (data.kind === "shape") {
+    drawShape(data);
     return;
   }
 
@@ -290,9 +415,73 @@ function drawUnderline(text, x, y) {
   ctx.stroke();
 }
 
+function drawTable(data) {
+  const x = data.x * canvas.width;
+  const y = data.y * canvas.height;
+  const width = data.width * canvas.width;
+  const height = data.height * canvas.height;
+  const rows = Math.max(1, Number(data.rows) || 1);
+  const cols = Math.max(1, Number(data.cols) || 1);
+  const cellWidth = width / cols;
+  const cellHeight = height / rows;
+
+  ctx.save();
+  ctx.strokeStyle = data.color || "#000000";
+  ctx.lineWidth = data.lineWidth || 2;
+
+  for (let row = 0; row <= rows; row += 1) {
+    const lineY = y + row * cellHeight;
+    ctx.beginPath();
+    ctx.moveTo(x, lineY);
+    ctx.lineTo(x + width, lineY);
+    ctx.stroke();
+  }
+
+  for (let col = 0; col <= cols; col += 1) {
+    const lineX = x + col * cellWidth;
+    ctx.beginPath();
+    ctx.moveTo(lineX, y);
+    ctx.lineTo(lineX, y + height);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+  ctx.beginPath();
+}
+
+function drawShape(data) {
+  const x = data.x * canvas.width;
+  const y = data.y * canvas.height;
+  const width = data.width * canvas.width;
+  const height = data.height * canvas.height;
+
+  ctx.save();
+  ctx.strokeStyle = data.color || "#000000";
+  ctx.lineWidth = data.lineWidth || 3;
+  ctx.lineJoin = "round";
+
+  if (data.shape === "circle") {
+    ctx.beginPath();
+    ctx.ellipse(x + width / 2, y + height / 2, Math.abs(width / 2), Math.abs(height / 2), 0, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (data.shape === "triangle") {
+    ctx.beginPath();
+    ctx.moveTo(x + width / 2, y);
+    ctx.lineTo(x + width, y + height);
+    ctx.lineTo(x, y + height);
+    ctx.closePath();
+    ctx.stroke();
+  } else {
+    ctx.strokeRect(x, y, width, height);
+  }
+
+  ctx.restore();
+  ctx.beginPath();
+}
+
 function recordBoardEvent(data) {
-  if (data.kind === "image" && data.id) {
-    const existingIndex = boardEvents.findIndex((event) => event.kind === "image" && event.id === data.id);
+  if (isReplaceableBoardObject(data)) {
+    const existingIndex = boardEvents.findIndex((event) => event.id === data.id);
 
     if (existingIndex >= 0) {
       boardEvents[existingIndex] = data;
@@ -302,6 +491,52 @@ function recordBoardEvent(data) {
 
   boardEvents.push(data);
 }
+
+function isReplaceableBoardObject(data) {
+  return ["image", "table", "shape"].includes(data.kind) && data.id;
+}
+
+function cloneBoardEvents(events = boardEvents) {
+  return JSON.parse(JSON.stringify(events));
+}
+
+function pushUndoSnapshot() {
+  if (role !== "teacher") return;
+
+  undoStack.push(cloneBoardEvents());
+
+  if (undoStack.length > maxHistoryItems) {
+    undoStack.shift();
+  }
+
+  redoStack = [];
+  updateHistoryButtons();
+}
+
+function applyBoardSnapshot(events) {
+  boardEvents = cloneBoardEvents(events);
+  selectedImageId = null;
+  selectedBoardObjectId = null;
+  imageInteraction = null;
+  boardObjectInteraction = null;
+  redrawBoard();
+  socket.emit("boardState", boardEvents);
+  updateHistoryButtons();
+}
+
+window.undoBoard = function () {
+  if (role !== "teacher" || undoStack.length === 0) return;
+
+  redoStack.push(cloneBoardEvents());
+  applyBoardSnapshot(undoStack.pop());
+};
+
+window.redoBoard = function () {
+  if (role !== "teacher" || redoStack.length === 0) return;
+
+  undoStack.push(cloneBoardEvents());
+  applyBoardSnapshot(redoStack.pop());
+};
 
 function drawImage(data) {
   const cachedImage = imageCache.get(data.src);
@@ -314,7 +549,7 @@ function drawImage(data) {
   const image = cachedImage || new Image();
   image.onload = () => {
     imageCache.set(data.src, image);
-    paintImage(image, data);
+    redrawBoard();
   };
 
   if (!cachedImage) {
@@ -369,6 +604,7 @@ function redrawBoard() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const events = [...boardEvents];
   events.forEach(drawLine);
+  drawSelectedBoardObjectOutline();
   drawSelectedImageOutline();
 }
 
@@ -379,21 +615,43 @@ socket.on("draw", (data) => {
   } else {
     drawLine(data);
   }
+  updateHistoryButtons();
+});
+
+socket.on("boardState", (events) => {
+  boardEvents = cloneBoardEvents(events || []);
+  selectedImageId = null;
+  selectedBoardObjectId = null;
+  imageInteraction = null;
+  boardObjectInteraction = null;
+  redrawBoard();
+  updateHistoryButtons();
 });
 
 function clearBoard() {
+  if (role !== "teacher") return;
+
+  pushUndoSnapshot();
   boardEvents = [];
   selectedImageId = null;
+  selectedBoardObjectId = null;
   imageInteraction = null;
+  boardObjectInteraction = null;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   socket.emit("clear");
+  updateHistoryButtons();
 }
 
 socket.on("clear", () => {
   boardEvents = [];
   selectedImageId = null;
+  selectedBoardObjectId = null;
   imageInteraction = null;
+  boardObjectInteraction = null;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  undoStack = [];
+  redoStack = [];
+  updateHistoryButtons();
 });
 
 function saveBoard() {
@@ -439,6 +697,7 @@ function placeTextAtLastPoint(text = boardTextEditor?.value) {
     underline: textStyles.underline
   };
 
+  pushUndoSnapshot();
   sendDrawData(data);
 }
 
@@ -448,7 +707,22 @@ function formatFontFamily(fontFamily) {
 }
 
 window.setTool = function (nextTool) {
+  if (tool === "text" && nextTool !== "text") {
+    commitOpenTextEditor();
+  }
+
+  stopShapeInteraction(false);
   tool = nextTool;
+  updateToolbarState();
+};
+
+window.setShapeTool = function (nextShapeType) {
+  if (role !== "teacher") return;
+
+  commitOpenTextEditor();
+  stopShapeInteraction(false);
+  shapeType = nextShapeType;
+  tool = "shape";
   updateToolbarState();
 };
 
@@ -463,16 +737,6 @@ window.pasteText = async function () {
   setTool("text");
   openTextEditor();
 };
-
-boardTextEditor?.addEventListener("paste", () => {
-  if (role !== "teacher") return;
-
-  setTool("text");
-
-  setTimeout(() => {
-    commitTextEditor();
-  }, 0);
-});
 
 boardTextEditor?.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -498,14 +762,28 @@ window.addEventListener("paste", (e) => {
     return;
   }
 
-  if (tool !== "text") return;
-
   const text = e.clipboardData?.getData("text");
   if (!text?.trim()) return;
 
   e.preventDefault();
-  openTextEditor(text);
-  commitTextEditor();
+  setTool("text");
+  placeTextAtLastPoint(text);
+});
+
+window.addEventListener("keydown", (e) => {
+  if (role !== "teacher") return;
+  if (document.activeElement === boardTextEditor) return;
+  if (!e.metaKey && !e.ctrlKey) return;
+
+  const key = e.key.toLowerCase();
+
+  if (key === "z" && !e.shiftKey) {
+    e.preventDefault();
+    window.undoBoard();
+  } else if ((key === "z" && e.shiftKey) || key === "y") {
+    e.preventDefault();
+    window.redoBoard();
+  }
 });
 
 window.addTextToBoard = function () {
@@ -517,6 +795,15 @@ window.addTextToBoard = function () {
   } else {
     openTextEditor();
   }
+};
+
+window.addTableToBoard = function () {
+  if (role !== "teacher") return;
+
+  commitOpenTextEditor();
+  setTool("table");
+  placeTableAtLastPoint();
+  setTool("pen");
 };
 
 window.chooseImage = function () {
@@ -537,7 +824,13 @@ imageInput?.addEventListener("change", () => {
 function getPastedImageFile(e) {
   const items = [...(e.clipboardData?.items || [])];
   const imageItem = items.find((item) => item.type.startsWith("image/"));
-  return imageItem?.getAsFile() || null;
+
+  if (imageItem) {
+    return imageItem.getAsFile();
+  }
+
+  const files = [...(e.clipboardData?.files || [])];
+  return files.find((file) => file.type.startsWith("image/")) || null;
 }
 
 function placeImageFile(file) {
@@ -586,6 +879,7 @@ function placeImage(src, sourceWidth, sourceHeight) {
   const id = createImageId();
   selectedImageId = id;
 
+  pushUndoSnapshot();
   sendDrawData({
     kind: "image",
     id,
@@ -595,6 +889,83 @@ function placeImage(src, sourceWidth, sourceHeight) {
     width: width / canvas.width,
     height: height / canvas.height
   });
+}
+
+function placeTableAtLastPoint() {
+  const rows = clampInteger(tableRowsInput?.value, 1, 20, 3);
+  const cols = clampInteger(tableColsInput?.value, 1, 20, 3);
+  const width = Math.min(0.6, 0.12 * cols);
+  const height = Math.min(0.5, 0.08 * rows);
+  const x = clamp(lastBoardPoint.x, 0, Math.max(0, 1 - width));
+  const y = clamp(lastBoardPoint.y, 0, Math.max(0, 1 - height));
+
+  pushUndoSnapshot();
+  sendDrawData({
+    kind: "table",
+    id: createBoardObjectId("table"),
+    rows,
+    cols,
+    x,
+    y,
+    width,
+    height,
+    color,
+    lineWidth: 2
+  });
+}
+
+function startShape(x, y) {
+  setBoardPoint(x, y);
+  shapeInteraction = {
+    startX: x / canvas.width,
+    startY: y / canvas.height,
+    currentX: x / canvas.width,
+    currentY: y / canvas.height
+  };
+  redrawBoard();
+}
+
+function updateShapePreview(x, y) {
+  if (!shapeInteraction) return;
+
+  shapeInteraction.currentX = x / canvas.width;
+  shapeInteraction.currentY = y / canvas.height;
+  redrawBoard();
+  drawShape(makeShapeData(shapeInteraction));
+}
+
+function stopShapeInteraction(commit) {
+  if (!shapeInteraction) return;
+
+  const data = makeShapeData(shapeInteraction);
+  shapeInteraction = null;
+
+  if (!commit || data.width < 0.005 || data.height < 0.005) {
+    redrawBoard();
+    return;
+  }
+
+  pushUndoSnapshot();
+  sendDrawData(data);
+}
+
+function makeShapeData(interaction) {
+  const x = Math.min(interaction.startX, interaction.currentX);
+  const y = Math.min(interaction.startY, interaction.currentY);
+  const width = Math.abs(interaction.currentX - interaction.startX);
+  const height = Math.abs(interaction.currentY - interaction.startY);
+
+  return {
+    kind: "shape",
+    id: createBoardObjectId("shape"),
+    shape: shapeType,
+    x,
+    y,
+    width,
+    height,
+    color,
+    lineWidth: 3
+  };
 }
 
 function findImageAt(x, y) {
@@ -615,6 +986,88 @@ function findImageAt(x, y) {
   return null;
 }
 
+function findBoardObjectAt(x, y, predicate) {
+  const pointX = x / canvas.width;
+  const pointY = y / canvas.height;
+
+  for (let index = boardEvents.length - 1; index >= 0; index -= 1) {
+    const event = boardEvents[index];
+
+    if (!predicate(event)) continue;
+
+    const isInsideX = pointX >= event.x && pointX <= event.x + event.width;
+    const isInsideY = pointY >= event.y && pointY <= event.y + event.height;
+
+    if (isInsideX && isInsideY) return event;
+  }
+
+  return null;
+}
+
+function startBoardObjectMove(object, x, y) {
+  if (!object.id) {
+    object.id = createBoardObjectId(object.kind);
+    recordBoardEvent(object);
+  }
+
+  selectedImageId = null;
+  selectedBoardObjectId = object.id;
+  boardObjectInteraction = {
+    startX: x / canvas.width,
+    startY: y / canvas.height,
+    original: { ...object },
+    historyRecorded: false
+  };
+  redrawBoard();
+}
+
+function updateBoardObjectMove(x, y) {
+  if (!boardObjectInteraction?.original) return;
+
+  if (!boardObjectInteraction.historyRecorded) {
+    pushUndoSnapshot();
+    boardObjectInteraction.historyRecorded = true;
+  }
+
+  const pointerX = x / canvas.width;
+  const pointerY = y / canvas.height;
+  const deltaX = pointerX - boardObjectInteraction.startX;
+  const deltaY = pointerY - boardObjectInteraction.startY;
+  const original = boardObjectInteraction.original;
+  const nextObject = {
+    ...original,
+    x: clamp(original.x + deltaX, 0, 1 - original.width),
+    y: clamp(original.y + deltaY, 0, 1 - original.height)
+  };
+
+  recordBoardEvent(nextObject);
+  socket.emit("draw", nextObject);
+  redrawBoard();
+}
+
+function stopBoardObjectMove() {
+  boardObjectInteraction = null;
+}
+
+function drawSelectedBoardObjectOutline() {
+  if (role !== "teacher" || !selectedBoardObjectId) return;
+
+  const selectedObject = boardEvents.find((event) => event.id === selectedBoardObjectId);
+  if (!selectedObject) return;
+
+  const x = selectedObject.x * canvas.width;
+  const y = selectedObject.y * canvas.height;
+  const width = selectedObject.width * canvas.width;
+  const height = selectedObject.height * canvas.height;
+
+  ctx.save();
+  ctx.strokeStyle = "#2563eb";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(x, y, width, height);
+  ctx.restore();
+}
+
 function isOnImageResizeHandle(image, x, y) {
   const handleSize = getImageHandleSize();
   const imageRight = (image.x + image.width) * canvas.width;
@@ -629,6 +1082,11 @@ function getImageHandleSize() {
 
 function updateSelectedImage(x, y) {
   if (!imageInteraction?.original) return;
+
+  if (!imageInteraction.historyRecorded) {
+    pushUndoSnapshot();
+    imageInteraction.historyRecorded = true;
+  }
 
   const pointerX = x / canvas.width;
   const pointerY = y / canvas.height;
@@ -664,12 +1122,22 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function clampInteger(value, min, max, fallback) {
+  const number = Number.parseInt(value, 10);
+  if (Number.isNaN(number)) return fallback;
+  return clamp(number, min, max);
+}
+
 function createImageId() {
+  return createBoardObjectId("image");
+}
+
+function createBoardObjectId(prefix) {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
     return crypto.randomUUID();
   }
 
-  return `image-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function openTextEditor(text = "") {
@@ -702,6 +1170,13 @@ function commitTextEditor() {
 
   placeTextAtLastPoint(boardTextEditor.value);
   closeTextEditor();
+  ctx.beginPath();
+}
+
+function commitOpenTextEditor() {
+  if (boardTextEditor?.style.display === "block") {
+    commitTextEditor();
+  }
 }
 
 function closeTextEditor() {
@@ -715,7 +1190,22 @@ function updateToolbarState() {
   penToolButton?.classList.toggle("active", tool === "pen");
   textToolButton?.classList.toggle("active", tool === "text");
   imageToolButton?.classList.toggle("active", tool === "image");
+  tableToolButton?.classList.toggle("active", tool === "table");
+  rectangleToolButton?.classList.toggle("active", tool === "shape" && shapeType === "rectangle");
+  circleToolButton?.classList.toggle("active", tool === "shape" && shapeType === "circle");
+  triangleToolButton?.classList.toggle("active", tool === "shape" && shapeType === "triangle");
   boldTextButton?.classList.toggle("active", textStyles.bold);
   italicTextButton?.classList.toggle("active", textStyles.italic);
   underlineTextButton?.classList.toggle("active", textStyles.underline);
+  updateHistoryButtons();
+}
+
+function updateHistoryButtons() {
+  if (undoBoardButton) {
+    undoBoardButton.disabled = role !== "teacher" || undoStack.length === 0;
+  }
+
+  if (redoBoardButton) {
+    redoBoardButton.disabled = role !== "teacher" || redoStack.length === 0;
+  }
 }

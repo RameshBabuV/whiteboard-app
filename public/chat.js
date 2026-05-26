@@ -1,7 +1,5 @@
 const chatBox = document.getElementById("chatBox");
 
-const name = prompt("Enter your name");
-
 // IMPORTANT: do NOT redeclare role here
 
 window.sendMsg = function () {
@@ -11,9 +9,7 @@ window.sendMsg = function () {
   if (!msg) return;
 
   const data = {
-    name,
-    msg,
-    role
+    msg
   };
 
   socket.emit("chat", data);

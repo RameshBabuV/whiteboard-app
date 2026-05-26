@@ -1,44 +1,93 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Login</title>
+  <title>Login | RS Academy Board</title>
+  <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="login-page">
 
-<h2>Login with Email</h2>
+<main class="login-card">
+  <h1>RS Academy Board</h1>
 
-<input id="email" placeholder="Enter Email"><br><br>
-<button onclick="login()">Send Login Link</button>
+  <form id="loginForm">
+    <label>
+      Name
+      <input id="name" name="name" autocomplete="name" required>
+    </label>
 
-<p id="msg"></p>
+    <label>
+      Role
+      <select id="role" name="role">
+        <option value="student">Student</option>
+        <option value="teacher">Teacher</option>
+      </select>
+    </label>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <label>
+      Room
+      <select id="room" name="room">
+        <option value="python">Python</option>
+        <option value="java">Java</option>
+        <option value="cpp">C & C++</option>
+        <option value="hadoop">Hadoop</option>
+      </select>
+    </label>
+
+    <label id="passwordField">
+      Teacher Password
+      <input id="password" name="password" type="password" autocomplete="current-password">
+    </label>
+
+    <button type="submit">Login</button>
+    <p id="msg"></p>
+  </form>
+</main>
 
 <script>
-const supabaseClient = supabase.createClient(
-  "https://cfxrsbjvrmdrklkrozxx.supabase.co",
-  "sb_publishable_-yvmuyusNEN5KuSuOx5_iA_6FaGDg3J"
-);
-
 const params = new URLSearchParams(window.location.search);
-const room = params.get("room") || "python";
+const form = document.getElementById("loginForm");
+const roleInput = document.getElementById("role");
+const roomInput = document.getElementById("room");
+const passwordField = document.getElementById("passwordField");
+const msg = document.getElementById("msg");
 
-async function login() {
-  const email = document.getElementById("email").value;
+roleInput.value = params.get("role") || "student";
+roomInput.value = params.get("room") || "python";
+togglePasswordField();
 
-  const { error } = await supabaseClient.auth.signInWithOtp({
-    email: email,
-    options: {
-      emailRedirectTo: window.location.origin + "/student.html?room=" + room
-    }
+roleInput.addEventListener("change", togglePasswordField);
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  msg.textContent = "";
+
+  const response = await fetch("/api/login", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      name: form.name.value,
+      role: form.role.value,
+      room: form.room.value,
+      password: form.password.value
+    })
   });
 
-  if (error) {
-    alert(error.message);
-  } else {
-    document.getElementById("msg").innerText =
-      "Check your email and click the login link!";
+  const data = await response.json();
+
+  if (!response.ok) {
+    msg.textContent = data.error || "Login failed.";
+    return;
   }
+
+  window.location.href = data.redirectTo;
+});
+
+function togglePasswordField() {
+  const isTeacher = roleInput.value === "teacher";
+  passwordField.style.display = isTeacher ? "block" : "none";
+  form.password.required = isTeacher;
 }
 </script>
 
