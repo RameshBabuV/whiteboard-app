@@ -162,12 +162,17 @@ io.on("connection", (socket) => {
     if (socket.session?.role !== "teacher") return;
 
     const board = roomBoards.get(socket.room) || [];
-    const existingIndex = ["image", "table", "shape"].includes(data.kind) && data.id
+    const existingIndex = ["background", "image", "table", "shape"].includes(data.kind) && data.id
       ? board.findIndex((event) => event.id === data.id)
       : -1;
 
     if (existingIndex >= 0) {
-      board[existingIndex] = data;
+      if (data.bringToFront) {
+        board.splice(existingIndex, 1);
+        board.push(data);
+      } else {
+        board[existingIndex] = data;
+      }
     } else {
       board.push(data);
     }

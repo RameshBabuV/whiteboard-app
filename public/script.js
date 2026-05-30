@@ -7,13 +7,25 @@ const fontFamilyInput = document.getElementById("fontFamily");
 const fontSizeInput = document.getElementById("fontSize");
 const textAlignInput = document.getElementById("textAlign");
 const imageInput = document.getElementById("imageInput");
+const backgroundColorInput = document.getElementById("backgroundColor");
+const toolSelect = document.getElementById("toolSelect");
+const selectToolButton = document.getElementById("selectTool");
 const penToolButton = document.getElementById("penTool");
+const eraserToolButton = document.getElementById("eraserTool");
+const fillToolButton = document.getElementById("fillTool");
 const textToolButton = document.getElementById("textTool");
 const imageToolButton = document.getElementById("imageTool");
 const tableToolButton = document.getElementById("tableTool");
 const rectangleToolButton = document.getElementById("rectangleTool");
 const circleToolButton = document.getElementById("circleTool");
 const triangleToolButton = document.getElementById("triangleTool");
+const lineToolButton = document.getElementById("lineTool");
+const diamondToolButton = document.getElementById("diamondTool");
+const pentagonToolButton = document.getElementById("pentagonTool");
+const hexagonToolButton = document.getElementById("hexagonTool");
+const starToolButton = document.getElementById("starTool");
+const arrowToolButton = document.getElementById("arrowTool");
+const parallelogramToolButton = document.getElementById("parallelogramTool");
 const boldTextButton = document.getElementById("boldText");
 const italicTextButton = document.getElementById("italicText");
 const underlineTextButton = document.getElementById("underlineText");
@@ -42,7 +54,9 @@ const role = window.location.pathname.includes("teacher")
   : "student";
 
 let drawing = false;
+let currentStrokeId = null;
 let color = "#000";
+let backgroundColor = "#ffffff";
 let tool = "pen";
 let lastTextPoint = { x: 0.05, y: 0.08 };
 let lastBoardPoint = { x: 0.05, y: 0.08 };
@@ -52,6 +66,7 @@ let shapeType = "rectangle";
 let shapeInteraction = null;
 let selectedBoardObjectId = null;
 let boardObjectInteraction = null;
+let moveMode = false;
 const imageCache = new Map();
 let textStyles = {
   bold: false,
@@ -61,6 +76,30 @@ let textStyles = {
 
 document.getElementById("color")?.addEventListener("change", (e) => {
   color = e.target.value;
+});
+
+backgroundColorInput?.addEventListener("change", () => {
+  setBoardBackground();
+});
+
+toolSelect?.addEventListener("change", (e) => {
+  const selectedTool = e.target.value;
+
+  if (selectedTool.startsWith("shape:")) {
+    setShapeTool(selectedTool.slice("shape:".length));
+  } else {
+    setTool(selectedTool);
+  }
+});
+
+toolSelect?.addEventListener("dblclick", () => {
+  enableMoveMode();
+});
+
+[selectToolButton, penToolButton, eraserToolButton, fillToolButton, textToolButton, imageToolButton, tableToolButton].forEach((button) => {
+  button?.addEventListener("dblclick", () => {
+    enableMoveMode();
+  });
 });
 
 window.addEventListener("resize", resizeCanvas);
@@ -74,7 +113,10 @@ function makeDrawData(x, y, type = "move") {
     type,
     x: x / canvas.width,
     y: y / canvas.height,
-    color
+    color: tool === "eraser" ? backgroundColor : color,
+    eraser: tool === "eraser",
+    lineWidth: tool === "eraser" ? 18 : 3,
+    strokeId: currentStrokeId
   };
 }
 
@@ -94,6 +136,18 @@ function sendDrawData(data) {
 canvas.addEventListener("mousedown", (e) => {
   if (role !== "teacher") return;
 
+  if (tool === "select") {
+    commitOpenTextEditor();
+    startSelectInteraction(e.offsetX, e.offsetY);
+    return;
+  }
+
+  if (tool === "fill") {
+    commitOpenTextEditor();
+    fillAtPoint(e.offsetX, e.offsetY);
+    return;
+  }
+
   if (tool === "text") {
     commitOpenTextEditor();
     setBoardPoint(e.offsetX, e.offsetY);
@@ -110,6 +164,7 @@ canvas.addEventListener("mousedown", (e) => {
       selectedImageId = image.id;
       imageInteraction = {
         mode: isOnImageResizeHandle(image, e.offsetX, e.offsetY) ? "resize" : "move",
+        handle: isOnImageResizeHandle(image, e.offsetX, e.offsetY) ? "se" : null,
         startX: e.offsetX / canvas.width,
         startY: e.offsetY / canvas.height,
         original: { ...image },
@@ -140,11 +195,13 @@ canvas.addEventListener("mousedown", (e) => {
 
   if (tool === "shape") {
     commitOpenTextEditor();
-    const shape = findBoardObjectAt(e.offsetX, e.offsetY, (event) => event.kind === "shape");
+    if (moveMode) {
+      const shape = findBoardObjectAt(e.offsetX, e.offsetY, (event) => event.kind === "shape");
 
-    if (shape) {
-      startBoardObjectMove(shape, e.offsetX, e.offsetY);
-      return;
+      if (shape) {
+        startBoardObjectMove(shape, e.offsetX, e.offsetY);
+        return;
+      }
     }
 
     startShape(e.offsetX, e.offsetY);
@@ -154,6 +211,7 @@ canvas.addEventListener("mousedown", (e) => {
   commitOpenTextEditor();
   setBoardPoint(e.offsetX, e.offsetY);
   drawing = true;
+  currentStrokeId = createBoardObjectId("stroke");
   pushUndoSnapshot();
   sendDrawData(makeDrawData(e.offsetX, e.offsetY, "start"));
 });
@@ -172,6 +230,18 @@ canvas.addEventListener("touchstart", (e) => {
   e.preventDefault();
   const point = getTouchPoint(e);
 
+  if (tool === "select") {
+    commitOpenTextEditor();
+    startSelectInteraction(point.x, point.y);
+    return;
+  }
+
+  if (tool === "fill") {
+    commitOpenTextEditor();
+    fillAtPoint(point.x, point.y);
+    return;
+  }
+
   if (tool === "text") {
     commitOpenTextEditor();
     setBoardPoint(point.x, point.y);
@@ -188,6 +258,7 @@ canvas.addEventListener("touchstart", (e) => {
       selectedImageId = image.id;
       imageInteraction = {
         mode: isOnImageResizeHandle(image, point.x, point.y) ? "resize" : "move",
+        handle: isOnImageResizeHandle(image, point.x, point.y) ? "se" : null,
         startX: point.x / canvas.width,
         startY: point.y / canvas.height,
         original: { ...image },
@@ -218,11 +289,13 @@ canvas.addEventListener("touchstart", (e) => {
 
   if (tool === "shape") {
     commitOpenTextEditor();
-    const shape = findBoardObjectAt(point.x, point.y, (event) => event.kind === "shape");
+    if (moveMode) {
+      const shape = findBoardObjectAt(point.x, point.y, (event) => event.kind === "shape");
 
-    if (shape) {
-      startBoardObjectMove(shape, point.x, point.y);
-      return;
+      if (shape) {
+        startBoardObjectMove(shape, point.x, point.y);
+        return;
+      }
     }
 
     startShape(point.x, point.y);
@@ -232,6 +305,7 @@ canvas.addEventListener("touchstart", (e) => {
   commitOpenTextEditor();
   setBoardPoint(point.x, point.y);
   drawing = true;
+  currentStrokeId = createBoardObjectId("stroke");
 
   pushUndoSnapshot();
   sendDrawData(makeDrawData(point.x, point.y, "start"));
@@ -247,7 +321,7 @@ function draw(e) {
 
   setBoardPoint(e.offsetX, e.offsetY);
 
-  if (tool === "image" && imageInteraction) {
+  if (imageInteraction) {
     updateSelectedImage(e.offsetX, e.offsetY);
     return;
   }
@@ -262,7 +336,7 @@ function draw(e) {
     return;
   }
 
-  if (tool !== "pen") return;
+  if (!["pen", "eraser"].includes(tool)) return;
   if (!drawing) return;
 
   sendDrawData(makeDrawData(e.offsetX, e.offsetY));
@@ -281,7 +355,7 @@ function getTouchPoint(e) {
 function touchDraw(e) {
   if (role !== "teacher") return;
 
-  if (tool === "image" && imageInteraction) {
+  if (imageInteraction) {
     e.preventDefault();
     const point = getTouchPoint(e);
     updateSelectedImage(point.x, point.y);
@@ -302,7 +376,7 @@ function touchDraw(e) {
     return;
   }
 
-  if (tool !== "pen") return;
+  if (!["pen", "eraser"].includes(tool)) return;
   if (!drawing) return;
 
   e.preventDefault();
@@ -323,10 +397,16 @@ function stopDrawing() {
   if (role !== "teacher" || !drawing) return;
 
   drawing = false;
-  sendDrawData({ type: "end" });
+  sendDrawData({ type: "end", strokeId: currentStrokeId });
+  currentStrokeId = null;
 }
 
 function drawLine(data) {
+  if (data.kind === "background") {
+    applyBackgroundEvent(data);
+    return;
+  }
+
   if (data.kind === "text") {
     drawText(data);
     return;
@@ -355,8 +435,8 @@ function drawLine(data) {
   const x = data.x * canvas.width;
   const y = data.y * canvas.height;
 
-  ctx.strokeStyle = data.color;
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = data.eraser ? backgroundColor : data.color;
+  ctx.lineWidth = data.lineWidth || 3;
   ctx.lineCap = "round";
 
   if (data.type === "start") {
@@ -426,6 +506,11 @@ function drawTable(data) {
   const cellHeight = height / rows;
 
   ctx.save();
+  applyObjectRotation(data);
+  if (data.fillColor) {
+    ctx.fillStyle = data.fillColor;
+    ctx.fillRect(x, y, width, height);
+  }
   ctx.strokeStyle = data.color || "#000000";
   ctx.lineWidth = data.lineWidth || 2;
 
@@ -456,13 +541,27 @@ function drawShape(data) {
   const height = data.height * canvas.height;
 
   ctx.save();
+  applyObjectRotation(data);
+  ctx.fillStyle = data.fillColor || "transparent";
   ctx.strokeStyle = data.color || "#000000";
   ctx.lineWidth = data.lineWidth || 3;
   ctx.lineJoin = "round";
+  ctx.lineCap = "round";
 
-  if (data.shape === "circle") {
+  if (data.shape === "line") {
+    const startX = x + (data.startOffsetX || 0) * width;
+    const startY = y + (data.startOffsetY || 0) * height;
+    const endX = x + (data.endOffsetX ?? 1) * width;
+    const endY = y + (data.endOffsetY ?? 1) * height;
+
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+  } else if (data.shape === "circle") {
     ctx.beginPath();
     ctx.ellipse(x + width / 2, y + height / 2, Math.abs(width / 2), Math.abs(height / 2), 0, 0, Math.PI * 2);
+    fillCurrentPath(data);
     ctx.stroke();
   } else if (data.shape === "triangle") {
     ctx.beginPath();
@@ -470,8 +569,36 @@ function drawShape(data) {
     ctx.lineTo(x + width, y + height);
     ctx.lineTo(x, y + height);
     ctx.closePath();
+    fillCurrentPath(data);
     ctx.stroke();
+  } else if (data.shape === "diamond") {
+    strokePolygon([
+      [x + width / 2, y],
+      [x + width, y + height / 2],
+      [x + width / 2, y + height],
+      [x, y + height / 2]
+    ], Boolean(data.fillColor));
+  } else if (data.shape === "pentagon") {
+    strokeRegularPolygon(x, y, width, height, 5, -Math.PI / 2, Boolean(data.fillColor));
+  } else if (data.shape === "hexagon") {
+    strokeRegularPolygon(x, y, width, height, 6, Math.PI / 6, Boolean(data.fillColor));
+  } else if (data.shape === "star") {
+    strokeStar(x, y, width, height, Boolean(data.fillColor));
+  } else if (data.shape === "arrow") {
+    strokeArrow(x, y, width, height, data);
+  } else if (data.shape === "parallelogram") {
+    const slant = width * 0.22;
+
+    strokePolygon([
+      [x + slant, y],
+      [x + width, y],
+      [x + width - slant, y + height],
+      [x, y + height]
+    ], Boolean(data.fillColor));
   } else {
+    if (data.fillColor) {
+      ctx.fillRect(x, y, width, height);
+    }
     ctx.strokeRect(x, y, width, height);
   }
 
@@ -479,11 +606,110 @@ function drawShape(data) {
   ctx.beginPath();
 }
 
+function strokePolygon(points, shouldFill = false) {
+  ctx.beginPath();
+  points.forEach(([pointX, pointY], index) => {
+    if (index === 0) {
+      ctx.moveTo(pointX, pointY);
+    } else {
+      ctx.lineTo(pointX, pointY);
+    }
+  });
+  ctx.closePath();
+  if (shouldFill) {
+    ctx.fill();
+  }
+  ctx.stroke();
+}
+
+function fillCurrentPath(data) {
+  if (data.fillColor) {
+    ctx.fill();
+  }
+}
+
+function strokeRegularPolygon(x, y, width, height, sides, rotation = 0, shouldFill = false) {
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  const radiusX = Math.abs(width / 2);
+  const radiusY = Math.abs(height / 2);
+  const points = [];
+
+  for (let index = 0; index < sides; index += 1) {
+    const angle = rotation + (index * Math.PI * 2) / sides;
+    points.push([
+      centerX + Math.cos(angle) * radiusX,
+      centerY + Math.sin(angle) * radiusY
+    ]);
+  }
+
+  strokePolygon(points, shouldFill);
+}
+
+function strokeStar(x, y, width, height, shouldFill = false) {
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  const outerRadiusX = Math.abs(width / 2);
+  const outerRadiusY = Math.abs(height / 2);
+  const innerRadiusX = outerRadiusX * 0.45;
+  const innerRadiusY = outerRadiusY * 0.45;
+  const points = [];
+
+  for (let index = 0; index < 10; index += 1) {
+    const angle = -Math.PI / 2 + (index * Math.PI) / 5;
+    const radiusX = index % 2 === 0 ? outerRadiusX : innerRadiusX;
+    const radiusY = index % 2 === 0 ? outerRadiusY : innerRadiusY;
+
+    points.push([
+      centerX + Math.cos(angle) * radiusX,
+      centerY + Math.sin(angle) * radiusY
+    ]);
+  }
+
+  strokePolygon(points, shouldFill);
+}
+
+function strokeArrow(x, y, width, height, data) {
+  const startX = x + (data.startOffsetX || 0) * width;
+  const startY = y + (data.startOffsetY ?? 0.5) * height;
+  const endX = x + (data.endOffsetX ?? 1) * width;
+  const endY = y + (data.endOffsetY ?? 0.5) * height;
+  const angle = Math.atan2(endY - startY, endX - startX);
+  const length = Math.hypot(endX - startX, endY - startY);
+  const headLength = Math.min(length * 0.28, 28);
+  const headAngle = Math.PI / 7;
+
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(
+    endX - Math.cos(angle - headAngle) * headLength,
+    endY - Math.sin(angle - headAngle) * headLength
+  );
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(
+    endX - Math.cos(angle + headAngle) * headLength,
+    endY - Math.sin(angle + headAngle) * headLength
+  );
+  ctx.stroke();
+}
+
 function recordBoardEvent(data) {
+  if (data.kind === "background") {
+    applyBackgroundEvent(data);
+  }
+
   if (isReplaceableBoardObject(data)) {
     const existingIndex = boardEvents.findIndex((event) => event.id === data.id);
 
     if (existingIndex >= 0) {
+      if (data.bringToFront) {
+        boardEvents.splice(existingIndex, 1);
+        boardEvents.push(data);
+        return;
+      }
+
       boardEvents[existingIndex] = data;
       return;
     }
@@ -493,7 +719,7 @@ function recordBoardEvent(data) {
 }
 
 function isReplaceableBoardObject(data) {
-  return ["image", "table", "shape"].includes(data.kind) && data.id;
+  return ["background", "image", "table", "shape"].includes(data.kind) && data.id;
 }
 
 function cloneBoardEvents(events = boardEvents) {
@@ -515,6 +741,7 @@ function pushUndoSnapshot() {
 
 function applyBoardSnapshot(events) {
   boardEvents = cloneBoardEvents(events);
+  syncBackgroundFromEvents();
   selectedImageId = null;
   selectedBoardObjectId = null;
   imageInteraction = null;
@@ -563,7 +790,10 @@ function paintImage(image, data) {
   const width = data.width * canvas.width;
   const height = data.height * canvas.height;
 
+  ctx.save();
+  applyObjectRotation(data);
   ctx.drawImage(image, x, y, width, height);
+  ctx.restore();
   ctx.beginPath();
 
   if (role === "teacher" && selectedImageId === data.id) {
@@ -572,23 +802,80 @@ function paintImage(image, data) {
 }
 
 function drawImageSelection(data) {
-  const x = data.x * canvas.width;
-  const y = data.y * canvas.height;
-  const width = data.width * canvas.width;
-  const height = data.height * canvas.height;
-  const handleSize = getImageHandleSize();
+  drawTransformSelection(data);
+}
 
-  ctx.save();
-  ctx.strokeStyle = "#2563eb";
-  ctx.lineWidth = 2;
-  ctx.setLineDash([6, 4]);
-  ctx.strokeRect(x, y, width, height);
-  ctx.setLineDash([]);
-  ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = "#2563eb";
-  ctx.fillRect(x + width - handleSize / 2, y + height - handleSize / 2, handleSize, handleSize);
-  ctx.strokeRect(x + width - handleSize / 2, y + height - handleSize / 2, handleSize, handleSize);
-  ctx.restore();
+function applyObjectRotation(object) {
+  const rotation = getObjectRotation(object);
+  if (!rotation) return;
+
+  const center = getObjectCenterPixels(object);
+  ctx.translate(center.x, center.y);
+  ctx.rotate(rotation);
+  ctx.translate(-center.x, -center.y);
+}
+
+function getObjectRotation(object) {
+  return Number(object.rotation) || 0;
+}
+
+function getObjectBoxPixels(object) {
+  return {
+    x: object.x * canvas.width,
+    y: object.y * canvas.height,
+    width: object.width * canvas.width,
+    height: object.height * canvas.height
+  };
+}
+
+function getObjectCenterPixels(object) {
+  const box = getObjectBoxPixels(object);
+
+  return {
+    x: box.x + box.width / 2,
+    y: box.y + box.height / 2
+  };
+}
+
+function rotatePointAroundCenter(x, y, object, angle) {
+  const center = getObjectCenterPixels(object);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const deltaX = x - center.x;
+  const deltaY = y - center.y;
+
+  return {
+    x: center.x + deltaX * cos - deltaY * sin,
+    y: center.y + deltaX * sin + deltaY * cos
+  };
+}
+
+function getResizeHandles(object) {
+  const box = getObjectBoxPixels(object);
+
+  return [
+    { name: "nw", x: box.x, y: box.y },
+    { name: "ne", x: box.x + box.width, y: box.y },
+    { name: "se", x: box.x + box.width, y: box.y + box.height },
+    { name: "sw", x: box.x, y: box.y + box.height }
+  ];
+}
+
+function getRotateHandlePoint(object) {
+  const box = getObjectBoxPixels(object);
+
+  return {
+    x: box.x + box.width / 2,
+    y: box.y - getRotateHandleDistance()
+  };
+}
+
+function getTransformHandleSize() {
+  return 12;
+}
+
+function getRotateHandleDistance() {
+  return 28;
 }
 
 function drawSelectedImageOutline() {
@@ -602,15 +889,38 @@ function drawSelectedImageOutline() {
 
 function redrawBoard() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  fillCanvasBackground();
   const events = [...boardEvents];
-  events.forEach(drawLine);
+  events
+    .filter((event) => event.kind !== "background")
+    .forEach(drawLine);
   drawSelectedBoardObjectOutline();
   drawSelectedImageOutline();
 }
 
+function fillCanvasBackground() {
+  ctx.save();
+  ctx.fillStyle = backgroundColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+function applyBackgroundEvent(data) {
+  backgroundColor = data.color || "#ffffff";
+
+  if (backgroundColorInput) {
+    backgroundColorInput.value = backgroundColor;
+  }
+}
+
+function syncBackgroundFromEvents() {
+  const backgroundEvent = [...boardEvents].reverse().find((event) => event.kind === "background");
+  applyBackgroundEvent(backgroundEvent || { color: "#ffffff" });
+}
+
 socket.on("draw", (data) => {
   recordBoardEvent(data);
-  if (data.kind === "image") {
+  if (isReplaceableBoardObject(data)) {
     redrawBoard();
   } else {
     drawLine(data);
@@ -620,6 +930,7 @@ socket.on("draw", (data) => {
 
 socket.on("boardState", (events) => {
   boardEvents = cloneBoardEvents(events || []);
+  syncBackgroundFromEvents();
   selectedImageId = null;
   selectedBoardObjectId = null;
   imageInteraction = null;
@@ -633,26 +944,42 @@ function clearBoard() {
 
   pushUndoSnapshot();
   boardEvents = [];
+  applyBackgroundEvent({ color: "#ffffff" });
   selectedImageId = null;
   selectedBoardObjectId = null;
   imageInteraction = null;
   boardObjectInteraction = null;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  redrawBoard();
   socket.emit("clear");
   updateHistoryButtons();
 }
 
 socket.on("clear", () => {
   boardEvents = [];
+  applyBackgroundEvent({ color: "#ffffff" });
   selectedImageId = null;
   selectedBoardObjectId = null;
   imageInteraction = null;
   boardObjectInteraction = null;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  redrawBoard();
   undoStack = [];
   redoStack = [];
   updateHistoryButtons();
 });
+
+window.setBoardBackground = function () {
+  if (role !== "teacher") return;
+
+  const nextColor = backgroundColorInput?.value || "#ffffff";
+  if (nextColor === backgroundColor) return;
+
+  pushUndoSnapshot();
+  sendDrawData({
+    kind: "background",
+    id: "background",
+    color: nextColor
+  });
+};
 
 function saveBoard() {
   const link = document.createElement("a");
@@ -712,6 +1039,10 @@ window.setTool = function (nextTool) {
   }
 
   stopShapeInteraction(false);
+  if (nextTool !== "select") {
+    clearSelectionState();
+  }
+  moveMode = false;
   tool = nextTool;
   updateToolbarState();
 };
@@ -721,10 +1052,21 @@ window.setShapeTool = function (nextShapeType) {
 
   commitOpenTextEditor();
   stopShapeInteraction(false);
+  clearSelectionState();
+  moveMode = false;
   shapeType = nextShapeType;
   tool = "shape";
   updateToolbarState();
 };
+
+function enableMoveMode() {
+  if (role !== "teacher") return;
+
+  commitOpenTextEditor();
+  stopShapeInteraction(false);
+  moveMode = true;
+  updateToolbarState();
+}
 
 window.toggleTextStyle = function (style) {
   textStyles[style] = !textStyles[style];
@@ -916,6 +1258,8 @@ function placeTableAtLastPoint() {
 
 function startShape(x, y) {
   setBoardPoint(x, y);
+  selectedBoardObjectId = null;
+  selectedImageId = null;
   shapeInteraction = {
     startX: x / canvas.width,
     startY: y / canvas.height,
@@ -940,7 +1284,7 @@ function stopShapeInteraction(commit) {
   const data = makeShapeData(shapeInteraction);
   shapeInteraction = null;
 
-  if (!commit || data.width < 0.005 || data.height < 0.005) {
+  if (!commit || isTinyShape(data)) {
     redrawBoard();
     return;
   }
@@ -955,7 +1299,7 @@ function makeShapeData(interaction) {
   const width = Math.abs(interaction.currentX - interaction.startX);
   const height = Math.abs(interaction.currentY - interaction.startY);
 
-  return {
+  const data = {
     kind: "shape",
     id: createBoardObjectId("shape"),
     shape: shapeType,
@@ -966,6 +1310,28 @@ function makeShapeData(interaction) {
     color,
     lineWidth: 3
   };
+
+  if (shapeType === "line") {
+    data.startOffsetX = interaction.startX <= interaction.currentX ? 0 : 1;
+    data.startOffsetY = interaction.startY <= interaction.currentY ? 0 : 1;
+    data.endOffsetX = interaction.startX <= interaction.currentX ? 1 : 0;
+    data.endOffsetY = interaction.startY <= interaction.currentY ? 1 : 0;
+  } else if (shapeType === "arrow") {
+    data.startOffsetX = interaction.startX <= interaction.currentX ? 0 : 1;
+    data.startOffsetY = interaction.startY <= interaction.currentY ? 0 : 1;
+    data.endOffsetX = interaction.startX <= interaction.currentX ? 1 : 0;
+    data.endOffsetY = interaction.startY <= interaction.currentY ? 1 : 0;
+  }
+
+  return data;
+}
+
+function isTinyShape(data) {
+  if (data.shape === "line" || data.shape === "arrow") {
+    return Math.hypot(data.width, data.height) < 0.005;
+  }
+
+  return data.width < 0.005 || data.height < 0.005;
 }
 
 function findImageAt(x, y) {
@@ -994,17 +1360,276 @@ function findBoardObjectAt(x, y, predicate) {
     const event = boardEvents[index];
 
     if (!predicate(event)) continue;
-
-    const isInsideX = pointX >= event.x && pointX <= event.x + event.width;
-    const isInsideY = pointY >= event.y && pointY <= event.y + event.height;
-
-    if (isInsideX && isInsideY) return event;
+    if (isPointInBoardObject(event, pointX, pointY)) return event;
   }
 
   return null;
 }
 
-function startBoardObjectMove(object, x, y) {
+function startSelectInteraction(x, y) {
+  startSelectionMove(x, y);
+}
+
+function startSelectionMove(x, y) {
+  const currentSelection = getSelectedTransformObject();
+  const handle = currentSelection ? getTransformHandleAt(currentSelection, x, y) : null;
+  const selectedObject = handle ? currentSelection : findSelectableObjectAt(x, y);
+
+  if (!selectedObject) {
+    selectedImageId = null;
+    selectedBoardObjectId = null;
+    redrawBoard();
+    return;
+  }
+
+  const mode = handle?.mode || "move";
+
+  if (selectedObject.kind === "image") {
+    selectedBoardObjectId = null;
+    selectedImageId = selectedObject.id;
+    imageInteraction = {
+      mode,
+      handle: handle?.name,
+      startX: x / canvas.width,
+      startY: y / canvas.height,
+      original: { ...selectedObject },
+      historyRecorded: false
+    };
+    redrawBoard();
+    return;
+  }
+
+  startBoardObjectMove(selectedObject, x, y, mode, handle?.name);
+}
+
+function clearObjectSelection() {
+  selectedImageId = null;
+  selectedBoardObjectId = null;
+}
+
+function clearSelectionState() {
+  clearObjectSelection();
+}
+
+function findSelectableObjectAt(x, y) {
+  const pointX = x / canvas.width;
+  const pointY = y / canvas.height;
+
+  for (let index = boardEvents.length - 1; index >= 0; index -= 1) {
+    const event = boardEvents[index];
+
+    if (!["image", "table", "shape"].includes(event.kind)) continue;
+    if (isPointInBoardObject(event, pointX, pointY)) return event;
+  }
+
+  return null;
+}
+
+function fillAtPoint(x, y) {
+  const selectedObject = getSelectedTransformObject();
+  const target = selectedObject || findSelectableObjectAt(x, y);
+
+  if (!target) {
+    pushUndoSnapshot();
+    if (backgroundColorInput) {
+      backgroundColorInput.value = color;
+    }
+    sendDrawData({
+      kind: "background",
+      id: "background",
+      color
+    });
+    return;
+  }
+
+  if (target.kind === "image") {
+    return;
+  }
+
+  pushUndoSnapshot();
+  const nextObject = { ...target };
+
+  if (target.kind === "shape" && ["line", "arrow"].includes(target.shape)) {
+    nextObject.color = color;
+  } else {
+    nextObject.fillColor = color;
+  }
+
+  nextObject.bringToFront = true;
+  selectedImageId = null;
+  selectedBoardObjectId = nextObject.id;
+  sendDrawData(nextObject);
+}
+
+function isPointInBoardObject(object, pointX, pointY) {
+  if (getObjectRotation(object)) {
+    const localPoint = getLocalBoardPoint(object, pointX * canvas.width, pointY * canvas.height);
+    pointX = localPoint.x;
+    pointY = localPoint.y;
+  }
+
+  const toleranceX = 10 / canvas.width;
+  const toleranceY = 10 / canvas.height;
+  const minX = Math.min(object.x, object.x + object.width) - toleranceX;
+  const maxX = Math.max(object.x, object.x + object.width) + toleranceX;
+  const minY = Math.min(object.y, object.y + object.height) - toleranceY;
+  const maxY = Math.max(object.y, object.y + object.height) + toleranceY;
+
+  if (object.kind === "shape" && ["line", "arrow"].includes(object.shape)) {
+    const startX = object.x + (object.startOffsetX || 0) * object.width;
+    const startY = object.y + (object.startOffsetY || 0) * object.height;
+    const endX = object.x + (object.endOffsetX ?? 1) * object.width;
+    const endY = object.y + (object.endOffsetY ?? 1) * object.height;
+    const distance = distanceToSegment(pointX, pointY, startX, startY, endX, endY);
+
+    return distance <= Math.max(toleranceX, toleranceY);
+  }
+
+  return pointX >= minX && pointX <= maxX && pointY >= minY && pointY <= maxY;
+}
+
+function distanceToSegment(pointX, pointY, startX, startY, endX, endY) {
+  const deltaX = endX - startX;
+  const deltaY = endY - startY;
+  const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+
+  if (lengthSquared === 0) {
+    return Math.hypot(pointX - startX, pointY - startY);
+  }
+
+  const t = clamp(((pointX - startX) * deltaX + (pointY - startY) * deltaY) / lengthSquared, 0, 1);
+  const projectedX = startX + t * deltaX;
+  const projectedY = startY + t * deltaY;
+
+  return Math.hypot(pointX - projectedX, pointY - projectedY);
+}
+
+function getSelectedTransformObject() {
+  if (selectedImageId) {
+    return boardEvents.find((event) => event.kind === "image" && event.id === selectedImageId) || null;
+  }
+
+  if (selectedBoardObjectId) {
+    return boardEvents.find((event) => event.id === selectedBoardObjectId) || null;
+  }
+
+  return null;
+}
+
+function getTransformHandleAt(object, x, y) {
+  const point = rotatePointAroundCenter(x, y, object, -getObjectRotation(object));
+  const handleSize = getTransformHandleSize();
+  const rotatePoint = getRotateHandlePoint(object);
+  const resizeHandle = getResizeHandles(object).find((handle) => {
+    return Math.abs(point.x - handle.x) <= handleSize && Math.abs(point.y - handle.y) <= handleSize;
+  });
+
+  if (resizeHandle) {
+    return {
+      mode: "resize",
+      name: resizeHandle.name
+    };
+  }
+
+  if (Math.hypot(point.x - rotatePoint.x, point.y - rotatePoint.y) <= handleSize) {
+    return {
+      mode: "rotate",
+      name: "rotate"
+    };
+  }
+
+  return null;
+}
+
+function transformSelectedObject(interaction, x, y) {
+  if (interaction.mode === "resize") {
+    return resizeObject(interaction.original, x, y, interaction.handle);
+  }
+
+  if (interaction.mode === "rotate") {
+    return rotateObject(interaction.original, x, y);
+  }
+
+  return moveObject(interaction.original, x, y, interaction.startX, interaction.startY);
+}
+
+function moveObject(original, x, y, startX, startY) {
+  const pointerX = x / canvas.width;
+  const pointerY = y / canvas.height;
+  const deltaX = pointerX - startX;
+  const deltaY = pointerY - startY;
+
+  return {
+    ...original,
+    x: clamp(original.x + deltaX, 0, Math.max(0, 1 - original.width)),
+    y: clamp(original.y + deltaY, 0, Math.max(0, 1 - original.height))
+  };
+}
+
+function resizeObject(original, x, y, handle) {
+  const minWidth = 0.02;
+  const minHeight = 0.02;
+  const localPoint = getLocalBoardPoint(original, x, y);
+  const edges = getResizeEdges(original, handle, localPoint);
+  const width = Math.max(minWidth, edges.right - edges.left);
+  const height = Math.max(minHeight, edges.bottom - edges.top);
+  const nextX = clamp(edges.left, 0, Math.max(0, 1 - minWidth));
+  const nextY = clamp(edges.top, 0, Math.max(0, 1 - minHeight));
+
+  return {
+    ...original,
+    x: nextX,
+    y: nextY,
+    width: clamp(width, minWidth, 1 - nextX),
+    height: clamp(height, minHeight, 1 - nextY)
+  };
+}
+
+function rotateObject(original, x, y) {
+  const center = getObjectCenterPixels(original);
+  const angle = Math.atan2(y - center.y, x - center.x) + Math.PI / 2;
+
+  return {
+    ...original,
+    rotation: angle
+  };
+}
+
+function getResizeEdges(original, handle, localPoint) {
+  handle = handle || "se";
+  const edges = {
+    left: original.x,
+    right: original.x + original.width,
+    top: original.y,
+    bottom: original.y + original.height
+  };
+
+  if (handle.includes("w")) edges.left = localPoint.x;
+  if (handle.includes("e")) edges.right = localPoint.x;
+  if (handle.includes("n")) edges.top = localPoint.y;
+  if (handle.includes("s")) edges.bottom = localPoint.y;
+
+  if (edges.left > edges.right) {
+    [edges.left, edges.right] = [edges.right, edges.left];
+  }
+
+  if (edges.top > edges.bottom) {
+    [edges.top, edges.bottom] = [edges.bottom, edges.top];
+  }
+
+  return edges;
+}
+
+function getLocalBoardPoint(object, x, y) {
+  const point = rotatePointAroundCenter(x, y, object, -getObjectRotation(object));
+
+  return {
+    x: point.x / canvas.width,
+    y: point.y / canvas.height
+  };
+}
+
+function startBoardObjectMove(object, x, y, mode = "move", handle = null) {
   if (!object.id) {
     object.id = createBoardObjectId(object.kind);
     recordBoardEvent(object);
@@ -1013,6 +1638,8 @@ function startBoardObjectMove(object, x, y) {
   selectedImageId = null;
   selectedBoardObjectId = object.id;
   boardObjectInteraction = {
+    mode,
+    handle,
     startX: x / canvas.width,
     startY: y / canvas.height,
     original: { ...object },
@@ -1029,16 +1656,7 @@ function updateBoardObjectMove(x, y) {
     boardObjectInteraction.historyRecorded = true;
   }
 
-  const pointerX = x / canvas.width;
-  const pointerY = y / canvas.height;
-  const deltaX = pointerX - boardObjectInteraction.startX;
-  const deltaY = pointerY - boardObjectInteraction.startY;
-  const original = boardObjectInteraction.original;
-  const nextObject = {
-    ...original,
-    x: clamp(original.x + deltaX, 0, 1 - original.width),
-    y: clamp(original.y + deltaY, 0, 1 - original.height)
-  };
+  const nextObject = transformSelectedObject(boardObjectInteraction, x, y);
 
   recordBoardEvent(nextObject);
   socket.emit("draw", nextObject);
@@ -1055,16 +1673,38 @@ function drawSelectedBoardObjectOutline() {
   const selectedObject = boardEvents.find((event) => event.id === selectedBoardObjectId);
   if (!selectedObject) return;
 
-  const x = selectedObject.x * canvas.width;
-  const y = selectedObject.y * canvas.height;
-  const width = selectedObject.width * canvas.width;
-  const height = selectedObject.height * canvas.height;
+  drawTransformSelection(selectedObject);
+}
+
+function drawTransformSelection(object) {
+  const box = getObjectBoxPixels(object);
+  const handleSize = getTransformHandleSize();
+  const rotateHandle = getRotateHandleDistance();
 
   ctx.save();
+  applyObjectRotation(object);
   ctx.strokeStyle = "#2563eb";
   ctx.lineWidth = 2;
   ctx.setLineDash([6, 4]);
-  ctx.strokeRect(x, y, width, height);
+  ctx.strokeRect(box.x, box.y, box.width, box.height);
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#2563eb";
+
+  getResizeHandles(object).forEach((handle) => {
+    ctx.fillRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
+    ctx.strokeRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
+  });
+
+  ctx.beginPath();
+  ctx.moveTo(box.x + box.width / 2, box.y);
+  ctx.lineTo(box.x + box.width / 2, box.y - rotateHandle);
+  ctx.stroke();
+  const rotatePoint = getRotateHandlePoint(object);
+  ctx.beginPath();
+  ctx.arc(rotatePoint.x, rotatePoint.y, handleSize / 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -1088,26 +1728,7 @@ function updateSelectedImage(x, y) {
     imageInteraction.historyRecorded = true;
   }
 
-  const pointerX = x / canvas.width;
-  const pointerY = y / canvas.height;
-  const deltaX = pointerX - imageInteraction.startX;
-  const deltaY = pointerY - imageInteraction.startY;
-  const original = imageInteraction.original;
-  const nextImage = { ...original };
-
-  if (imageInteraction.mode === "move") {
-    nextImage.x = clamp(original.x + deltaX, 0, 1 - original.width);
-    nextImage.y = clamp(original.y + deltaY, 0, 1 - original.height);
-  } else {
-    const minWidth = 0.04;
-    const minHeight = 0.04;
-    const horizontalScale = (pointerX - original.x) / original.width;
-    const verticalScale = (pointerY - original.y) / original.height;
-    const scale = Math.max(horizontalScale, verticalScale, minWidth / original.width, minHeight / original.height);
-
-    nextImage.width = Math.min(original.width * scale, 1 - original.x);
-    nextImage.height = Math.min(original.height * scale, 1 - original.y);
-  }
+  const nextImage = transformSelectedObject(imageInteraction, x, y);
 
   recordBoardEvent(nextImage);
   socket.emit("draw", nextImage);
@@ -1187,13 +1808,27 @@ function closeTextEditor() {
 }
 
 function updateToolbarState() {
+  document.getElementById("toolbar")?.classList.toggle("move-mode", moveMode);
+  selectToolButton?.classList.toggle("active", tool === "select");
   penToolButton?.classList.toggle("active", tool === "pen");
+  eraserToolButton?.classList.toggle("active", tool === "eraser");
+  fillToolButton?.classList.toggle("active", tool === "fill");
   textToolButton?.classList.toggle("active", tool === "text");
   imageToolButton?.classList.toggle("active", tool === "image");
   tableToolButton?.classList.toggle("active", tool === "table");
   rectangleToolButton?.classList.toggle("active", tool === "shape" && shapeType === "rectangle");
   circleToolButton?.classList.toggle("active", tool === "shape" && shapeType === "circle");
   triangleToolButton?.classList.toggle("active", tool === "shape" && shapeType === "triangle");
+  lineToolButton?.classList.toggle("active", tool === "shape" && shapeType === "line");
+  diamondToolButton?.classList.toggle("active", tool === "shape" && shapeType === "diamond");
+  pentagonToolButton?.classList.toggle("active", tool === "shape" && shapeType === "pentagon");
+  hexagonToolButton?.classList.toggle("active", tool === "shape" && shapeType === "hexagon");
+  starToolButton?.classList.toggle("active", tool === "shape" && shapeType === "star");
+  arrowToolButton?.classList.toggle("active", tool === "shape" && shapeType === "arrow");
+  parallelogramToolButton?.classList.toggle("active", tool === "shape" && shapeType === "parallelogram");
+  if (toolSelect) {
+    toolSelect.value = tool === "shape" ? `shape:${shapeType}` : tool;
+  }
   boldTextButton?.classList.toggle("active", textStyles.bold);
   italicTextButton?.classList.toggle("active", textStyles.italic);
   underlineTextButton?.classList.toggle("active", textStyles.underline);

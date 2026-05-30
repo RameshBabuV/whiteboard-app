@@ -10,18 +10,40 @@
 
   <div id="toolbar">
     <div class="toolbar-row">
-      <input type="color" id="color">
-      <button id="penTool" onclick="setTool('pen')">Pen</button>
-      <button id="textTool" onclick="setTool('text')">Text</button>
-      <button id="imageTool" onclick="setTool('image')">Image</button>
-      <button id="tableTool" onclick="setTool('table')">Table</button>
-      <button id="rectangleTool" onclick="setShapeTool('rectangle')">Rectangle</button>
-      <button id="circleTool" onclick="setShapeTool('circle')">Circle</button>
-      <button id="triangleTool" onclick="setShapeTool('triangle')">Triangle</button>
-      <button id="undoBoard" onclick="undoBoard()" disabled>Undo</button>
-      <button id="redoBoard" onclick="redoBoard()" disabled>Redo</button>
-      <button onclick="clearBoard()">Clear</button>
-      <button onclick="saveBoard()">Save</button>
+      <div class="color-stack" title="Front and background colors">
+        <input type="color" id="backgroundColor" value="#ffffff" title="Background color">
+        <input type="color" id="color" title="Drawing color">
+      </div>
+      <select id="toolSelect" title="Select tool">
+        <option value="select">&#10022; Select</option>
+        <option value="pen">&#9998; Pen</option>
+        <option value="eraser">&#9003; Eraser</option>
+        <option value="fill">&#9632; Fill</option>
+        <option value="text">T Text</option>
+        <option value="image">&#9635; Image</option>
+        <option value="table">&#8862; Table</option>
+        <option value="shape:rectangle">&#9645; Rectangle</option>
+        <option value="shape:circle">&#9711; Circle</option>
+        <option value="shape:triangle">&#9651; Triangle</option>
+        <option value="shape:line">&#9585; Line</option>
+        <option value="shape:diamond">&#9671; Diamond</option>
+        <option value="shape:pentagon">&#11040; Pentagon</option>
+        <option value="shape:hexagon">&#11042; Hexagon</option>
+        <option value="shape:star">&#9734; Star</option>
+        <option value="shape:arrow">&#8594; Arrow</option>
+        <option value="shape:parallelogram">&#9649; Parallelogram</option>
+      </select>
+      <button id="selectTool" onclick="setTool('select')" title="Select"><span class="tool-icon" aria-hidden="true">&#10022;</span><span>Select</span></button>
+      <button id="penTool" onclick="setTool('pen')" title="Pen"><span class="tool-icon" aria-hidden="true">&#9998;</span><span>Pen</span></button>
+      <button id="eraserTool" onclick="setTool('eraser')" title="Eraser"><span class="tool-icon" aria-hidden="true">&#9003;</span><span>Eraser</span></button>
+      <button id="fillTool" onclick="setTool('fill')" title="Fill"><span class="tool-icon" aria-hidden="true">&#9632;</span><span>Fill</span></button>
+      <button id="textTool" onclick="setTool('text')" title="Text"><span class="tool-icon" aria-hidden="true">T</span><span>Text</span></button>
+      <button id="imageTool" onclick="setTool('image')" title="Image"><span class="tool-icon" aria-hidden="true">&#9635;</span><span>Image</span></button>
+      <button id="tableTool" onclick="setTool('table')" title="Table"><span class="tool-icon" aria-hidden="true">&#8862;</span><span>Table</span></button>
+      <button id="undoBoard" onclick="undoBoard()" disabled title="Undo"><span class="tool-icon" aria-hidden="true">&#8630;</span><span>Undo</span></button>
+      <button id="redoBoard" onclick="redoBoard()" disabled title="Redo"><span class="tool-icon" aria-hidden="true">&#8631;</span><span>Redo</span></button>
+      <button onclick="clearBoard()" title="Clear"><span class="tool-icon" aria-hidden="true">&#9003;</span><span>Clear</span></button>
+      <button onclick="saveBoard()" title="Save"><span class="tool-icon" aria-hidden="true">&#8681;</span><span>Save</span></button>
     </div>
 
     <div class="toolbar-row">
@@ -65,20 +87,20 @@
         <option value="Verdana">Verdana</option>
       </select>
       <input type="number" id="fontSize" value="28" min="10" max="96">
-      <button id="boldText" onclick="toggleTextStyle('bold')">B</button>
-      <button id="italicText" onclick="toggleTextStyle('italic')">I</button>
-      <button id="underlineText" onclick="toggleTextStyle('underline')">U</button>
+      <button id="boldText" onclick="toggleTextStyle('bold')" title="Bold"><span class="tool-icon" aria-hidden="true">B</span><span>Bold</span></button>
+      <button id="italicText" onclick="toggleTextStyle('italic')" title="Italic"><span class="tool-icon" aria-hidden="true">I</span><span>Italic</span></button>
+      <button id="underlineText" onclick="toggleTextStyle('underline')" title="Underline"><span class="tool-icon" aria-hidden="true">U</span><span>Underline</span></button>
       <select id="textAlign">
         <option value="left">Left</option>
         <option value="center">Center</option>
         <option value="right">Right</option>
       </select>
-      <button onclick="addTextToBoard()">Add Text</button>
-      <button onclick="chooseImage()">Choose Image</button>
+      <button onclick="addTextToBoard()" title="Add Text"><span class="tool-icon" aria-hidden="true">T</span><span>Add Text</span></button>
+      <button onclick="chooseImage()" title="Choose Image"><span class="tool-icon" aria-hidden="true">&#9635;</span><span>Choose Image</span></button>
       <input type="file" id="imageInput" accept="image/*">
       <input type="number" id="tableRows" value="3" min="1" max="20" title="Rows">
       <input type="number" id="tableCols" value="3" min="1" max="20" title="Columns">
-      <button onclick="addTableToBoard()">Insert Table</button>
+      <button onclick="addTableToBoard()" title="Insert Table"><span class="tool-icon" aria-hidden="true">&#8862;</span><span>Insert Table</span></button>
     </div>
   </div>
 
