@@ -2,6 +2,10 @@ const express = require("express");
 const http = require("http");
 const socketIo = require("socket.io");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+
+loadEnvFile();
 
 const app = express();
 const server = http.createServer(app);
@@ -9,10 +13,42 @@ const io = socketIo(server, {
   maxHttpBufferSize: 10 * 1024 * 1024
 });
 const PORT = process.env.PORT || 3000;
-const path = require("path");
 const roomBoards = new Map();
 const sessions = new Map();
-const teacherPassword = process.env.TEACHER_PASSWORD || "teacher123";
+const teacherPassword = process.env.TEACHER_PASSWORD;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseApiKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+
+function loadEnvFile() {
+  const envFiles = [
+    process.env.ENV_FILE,
+    process.env.NODE_ENV ? `.env.${process.env.NODE_ENV}` : null,
+    ".env.prod",
+    ".env"
+  ].filter(Boolean);
+
+  envFiles.forEach((envFile) => {
+    const envPath = path.isAbsolute(envFile) ? envFile : path.join(__dirname, envFile);
+    if (!fs.existsSync(envPath)) return;
+
+    const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
+
+    lines.forEach((line) => {
+      const trimmedLine = line.trim();
+      if (!trimmedLine || trimmedLine.startsWith("#")) return;
+
+      const separatorIndex = trimmedLine.indexOf("=");
+      if (separatorIndex < 0) return;
+
+      const key = trimmedLine.slice(0, separatorIndex).trim();
+      const value = trimmedLine.slice(separatorIndex + 1).trim().replace(/^["']|["']$/g, "");
+
+      if (key && process.env[key] === undefined) {
+        process.env[key] = value;
+      }
+    });
+  });
+}
 
 function parseCookies(cookieHeader = "") {
   return Object.fromEntries(
@@ -69,6 +105,45 @@ function getSocketSession(socket) {
   return cookies.board_session ? sessions.get(cookies.board_session) : null;
 }
 
+async function verifyTeacherLogin(username, password) {
+  if (supabaseUrl && supabaseApiKey) {
+    try {
+      const response = await fetch(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/verify_teacher_login`, {
+        method: "POST",
+        headers: {
+          apikey: supabaseApiKey,
+          Authorization: `Bearer ${supabaseApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          p_username: username,
+          p_password: password
+        })
+      });
+
+      if (!response.ok) {
+        console.error("Supabase teacher login failed:", response.status, await response.text());
+        return null;
+      }
+
+      const teachers = await response.json();
+      return Array.isArray(teachers) && teachers.length > 0 ? teachers[0] : null;
+    } catch (error) {
+      console.error("Supabase teacher login error:", error);
+      return null;
+    }
+  }
+
+  if (teacherPassword) {
+    return password === teacherPassword
+      ? { username, display_name: username }
+      : null;
+  }
+
+  console.error("Teacher login is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+  return null;
+}
+
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
@@ -80,7 +155,7 @@ app.get("/login.html", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
-app.post("/api/login", (req, res) => {
+app.post("/api/login", async (req, res) => {
   const name = String(req.body.name || "").trim();
   const role = req.body.role === "teacher" ? "teacher" : "student";
   const room = sanitizeRoom(req.body.room || "python");
@@ -90,15 +165,25 @@ app.post("/api/login", (req, res) => {
     return res.status(400).json({ error: "Please enter your name." });
   }
 
-  if (role === "teacher" && password !== teacherPassword) {
-    return res.status(401).json({ error: "Invalid teacher password." });
+  let sessionName = name;
+  let teacher = null;
+
+  if (role === "teacher") {
+    teacher = await verifyTeacherLogin(name, password);
+
+    if (!teacher) {
+      return res.status(401).json({ error: "Invalid teacher username or password." });
+    }
+
+    sessionName = teacher.display_name || teacher.username || name;
   }
 
   const sessionId = crypto.randomUUID();
   sessions.set(sessionId, {
-    name,
+    name: sessionName,
     role,
     room,
+    teacherId: teacher?.id,
     createdAt: Date.now()
   });
 

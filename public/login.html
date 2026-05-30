@@ -11,7 +11,7 @@
 
   <form id="loginForm">
     <label>
-      Name
+      <span id="nameLabel">Name</span>
       <input id="name" name="name" autocomplete="name" required>
     </label>
 
@@ -49,6 +49,7 @@ const form = document.getElementById("loginForm");
 const roleInput = document.getElementById("role");
 const roomInput = document.getElementById("room");
 const passwordField = document.getElementById("passwordField");
+const nameLabel = document.getElementById("nameLabel");
 const msg = document.getElementById("msg");
 
 roleInput.value = params.get("role") || "student";
@@ -88,6 +89,8 @@ function togglePasswordField() {
   const isTeacher = roleInput.value === "teacher";
   passwordField.style.display = isTeacher ? "block" : "none";
   form.password.required = isTeacher;
+  nameLabel.textContent = isTeacher ? "Teacher Username" : "Name";
+  form.name.autocomplete = isTeacher ? "username" : "name";
 }
 </script>
 
