@@ -48,9 +48,24 @@
     </div>
 
     <div class="student-presence-box">
-      <select id="studentList" title="Connected students">
-        <option>Students: 0</option>
-      </select>
+      <label class="screen-share-toggle">
+        <input type="checkbox" id="screenShareToggle" onchange="toggleScreenSharePermission()">
+        <span>Screen share</span>
+      </label>
+      <details id="studentPicker" class="student-picker">
+        <summary id="studentPickerSummary">Students: 0</summary>
+        <div id="studentRadioList" class="student-radio-list">
+          <label class="student-radio-option muted-option">
+            <input type="radio" name="screenShareStudent" value="" disabled>
+            <span>No students</span>
+          </label>
+        </div>
+      </details>
+      <div id="screenSharePanel" class="screen-share-panel teacher-screen-panel screen-share-hidden">
+        <button id="shareScreen" onclick="startScreenShare()" title="Share screen"><span class="tool-icon" aria-hidden="true">&#9635;</span><span>Share</span></button>
+        <button id="stopScreenShare" onclick="stopScreenShare(true)" disabled title="Stop screen share"><span class="tool-icon" aria-hidden="true">&#9633;</span><span>Stop</span></button>
+        <span id="screenShareStatus">No screen shared</span>
+      </div>
     </div>
 
     <div class="teacher-call-box">
@@ -116,6 +131,8 @@
       <button onclick="addTableToBoard()" title="Insert Table"><span class="tool-icon" aria-hidden="true">&#8862;</span><span>Insert Table</span></button>
     </div>
   </div>
+
+  <video id="screenShareVideo" class="screen-share-video" autoplay playsinline controls></video>
 
   <canvas id="board"></canvas>
   <div id="boardResizeHandle" class="board-resize-handle" title="Drag to resize whiteboard"></div>

@@ -14,6 +14,14 @@
     <button id="studentMuteToggle" onclick="toggleStudentMute()" disabled title="Mute or unmute"><span class="tool-icon" aria-hidden="true">&#128263;</span><span>Unmute</span></button>
   </div>
 
+  <div id="screenSharePanel" class="screen-share-panel screen-share-hidden">
+    <button id="shareScreen" onclick="startScreenShare()" title="Share screen"><span class="tool-icon" aria-hidden="true">&#9635;</span><span>Share Screen</span></button>
+    <button id="stopScreenShare" onclick="stopScreenShare(true)" disabled title="Stop screen share"><span class="tool-icon" aria-hidden="true">&#9633;</span><span>Stop Share</span></button>
+    <span id="screenShareStatus">No screen shared</span>
+  </div>
+
+  <video id="screenShareVideo" class="screen-share-video" autoplay playsinline controls></video>
+
   <canvas id="board"></canvas>
   <div id="boardResizeHandle" class="board-resize-handle" title="Drag to resize whiteboard"></div>
 

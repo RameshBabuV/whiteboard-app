@@ -39,7 +39,14 @@ const endCallButton = document.getElementById("endCall");
 const studentCallBar = document.getElementById("studentCallBar");
 const studentMuteToggleButton = document.getElementById("studentMuteToggle");
 const callStatus = document.getElementById("callStatus");
-const studentList = document.getElementById("studentList");
+const screenShareToggle = document.getElementById("screenShareToggle");
+const studentPicker = document.getElementById("studentPicker");
+const studentPickerSummary = document.getElementById("studentPickerSummary");
+const studentRadioList = document.getElementById("studentRadioList");
+const shareScreenButton = document.getElementById("shareScreen");
+const stopScreenShareButton = document.getElementById("stopScreenShare");
+const screenShareStatus = document.getElementById("screenShareStatus");
+const screenShareVideo = document.getElementById("screenShareVideo");
 
 let boardEvents = [];
 let undoStack = [];
@@ -98,6 +105,16 @@ let teacherSocketId = null;
 let studentVoicePeer = null;
 let studentVoiceJoined = false;
 let studentMuted = true;
+let screenShareActive = false;
+let localScreenStream = null;
+let screenSharerId = null;
+let screenSharePermissionEnabled = false;
+let screenShareAllowed = false;
+let selectedScreenShareStudentId = "";
+let connectedStudents = [];
+let screenViewerPeer = null;
+const screenSharePeers = new Map();
+const pendingScreenCandidates = new Map();
 const teacherVoicePeers = new Map();
 const remoteVoiceAudios = new Map();
 const pendingVoiceCandidates = new Map();
@@ -140,6 +157,7 @@ window.addEventListener("resize", resizeCanvas);
 boardResizeHandle?.addEventListener("pointerdown", startBoardResize);
 
 updateToolbarState();
+updateScreenShareButtons();
 applySavedBoardHeight();
 resizeCanvas();
 socket.emit("joinRoom", room);
@@ -166,21 +184,106 @@ socket.on("voice-call-ended", () => {
   stopVoiceCall(false);
 });
 
+socket.on("screen-share-started", (data = {}) => {
+  screenShareActive = true;
+  screenSharerId = data.sharerId || null;
+  updateScreenShareButtons();
+  setScreenShareStatus(`${data.name || "Someone"} is sharing`);
+
+  if (screenSharerId && screenSharerId !== socket.id) {
+    socket.emit("screen-share-watch");
+  }
+});
+
+socket.on("screen-share-ended", () => {
+  stopScreenShare(false);
+});
+
+socket.on("screen-share-busy", (data = {}) => {
+  if (localScreenStream) {
+    stopScreenShare(false);
+  }
+
+  setScreenShareStatus(`${data.name || "Someone"} is already sharing`);
+});
+
+socket.on("screen-share-not-allowed", () => {
+  if (localScreenStream) {
+    stopScreenShare(false);
+  }
+
+  setScreenShareStatus("Screen share is not enabled");
+  updateScreenShareButtons();
+});
+
+socket.on("screen-share-permission", (data = {}) => {
+  screenSharePermissionEnabled = Boolean(data.enabled);
+  selectedScreenShareStudentId = data.studentId || "";
+
+  if (role === "teacher" && screenShareToggle) {
+    screenShareToggle.checked = screenSharePermissionEnabled;
+    renderStudentRadioList();
+  }
+
+  if (role === "student") {
+    screenShareAllowed = screenSharePermissionEnabled && selectedScreenShareStudentId === socket.id;
+    if (!screenShareAllowed && localScreenStream) {
+      stopScreenShare(true);
+    }
+  }
+
+  updateScreenShareButtons();
+});
+
+socket.on("screen-share-viewer-joined", async ({ viewerId }) => {
+  if (!screenShareActive || !localScreenStream || !viewerId) return;
+
+  const peer = createScreenSharerPeer(viewerId);
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+  sendScreenSignal(viewerId, peer.localDescription);
+});
+
+socket.on("screen-signal", async ({ fromId, signal }) => {
+  if (!fromId || !signal) return;
+
+  if (localScreenStream) {
+    const peer = screenSharePeers.get(fromId);
+    if (!peer) return;
+
+    if (signal.type === "answer") {
+      await peer.setRemoteDescription(signal);
+      await flushPendingScreenCandidates(fromId, peer);
+    } else if (signal.candidate) {
+      await addScreenIceCandidate(fromId, peer, signal);
+    }
+    return;
+  }
+
+  if (signal.type === "offer") {
+    await answerScreenShareOffer(fromId, signal);
+  } else if (signal.candidate) {
+    if (screenViewerPeer) {
+      await addScreenIceCandidate("screen-sharer", screenViewerPeer, signal);
+    } else {
+      const pending = pendingScreenCandidates.get("screen-sharer") || [];
+      pending.push(signal);
+      pendingScreenCandidates.set("screen-sharer", pending);
+    }
+  }
+});
+
 socket.on("student-list", (students = []) => {
-  if (role !== "teacher" || !studentList) return;
+  if (role !== "teacher") return;
 
-  studentList.innerHTML = "";
-  const summary = document.createElement("option");
-  summary.textContent = `Students: ${students.length}`;
-  summary.value = "";
-  studentList.appendChild(summary);
+  connectedStudents = Array.isArray(students) ? students : [];
 
-  students.forEach((student) => {
-    const option = document.createElement("option");
-    option.textContent = student.name || "Student";
-    option.value = student.id || "";
-    studentList.appendChild(option);
-  });
+  if (selectedScreenShareStudentId && !connectedStudents.some((student) => student.id === selectedScreenShareStudentId)) {
+    selectedScreenShareStudentId = "";
+    sendScreenSharePermission();
+  }
+
+  renderStudentRadioList();
 });
 
 socket.on("voice-call-student-joined", async ({ studentId, name }) => {
@@ -513,6 +616,284 @@ function setCallStatus(message) {
   }
 }
 
+window.toggleScreenSharePermission = function () {
+  if (role !== "teacher") return;
+
+  screenSharePermissionEnabled = Boolean(screenShareToggle?.checked);
+  if (!screenSharePermissionEnabled) {
+    selectedScreenShareStudentId = "";
+    if (studentPicker) {
+      studentPicker.open = false;
+    }
+    if (localScreenStream) {
+      stopScreenShare(true);
+    }
+  }
+
+  renderStudentRadioList();
+  sendScreenSharePermission();
+  updateScreenShareButtons();
+};
+
+function canStartScreenShare() {
+  if (role === "teacher") {
+    return screenSharePermissionEnabled;
+  }
+
+  return screenShareAllowed;
+}
+
+function sendScreenSharePermission() {
+  if (role !== "teacher") return;
+
+  socket.emit("screen-share-permission", {
+    enabled: screenSharePermissionEnabled,
+    studentId: selectedScreenShareStudentId
+  });
+}
+
+function renderStudentRadioList() {
+  if (role !== "teacher") return;
+
+  if (studentPickerSummary) {
+    studentPickerSummary.textContent = `Students: ${connectedStudents.length}`;
+  }
+
+  if (!studentRadioList) return;
+
+  studentRadioList.innerHTML = "";
+
+  if (connectedStudents.length === 0) {
+    const emptyLabel = document.createElement("label");
+    emptyLabel.className = "student-radio-option muted-option";
+    emptyLabel.innerHTML = '<input type="radio" name="screenShareStudent" value="" disabled><span>No students</span>';
+    studentRadioList.appendChild(emptyLabel);
+    return;
+  }
+
+  connectedStudents.forEach((student) => {
+    const label = document.createElement("label");
+    label.className = "student-radio-option";
+
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "screenShareStudent";
+    radio.value = student.id || "";
+    radio.checked = student.id === selectedScreenShareStudentId;
+    radio.disabled = !screenSharePermissionEnabled;
+    radio.addEventListener("change", () => {
+      selectedScreenShareStudentId = radio.value;
+      sendScreenSharePermission();
+      renderStudentRadioList();
+    });
+
+    const name = document.createElement("span");
+    name.textContent = student.name || "Student";
+
+    label.appendChild(radio);
+    label.appendChild(name);
+    studentRadioList.appendChild(label);
+  });
+}
+
+window.startScreenShare = async function () {
+  if (!canStartScreenShare()) {
+    setScreenShareStatus("Enable screen share first");
+    updateScreenShareButtons();
+    return;
+  }
+
+  if (screenShareActive && !localScreenStream) {
+    setScreenShareStatus("A screen is already shared");
+    return;
+  }
+
+  if (localScreenStream) return;
+
+  try {
+    localScreenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true
+    });
+    screenShareActive = true;
+    screenSharerId = socket.id;
+    showScreenStream(localScreenStream, true);
+    setScreenShareStatus("You are sharing");
+    updateScreenShareButtons();
+    localScreenStream.getVideoTracks()[0]?.addEventListener("ended", () => stopScreenShare(true));
+    socket.emit("screen-share-start");
+  } catch (error) {
+    console.error("Unable to share screen:", error);
+    localScreenStream = null;
+    setScreenShareStatus("Screen permission needed");
+    updateScreenShareButtons();
+  }
+};
+
+window.stopScreenShare = function (notifyServer = true) {
+  if (notifyServer && localScreenStream) {
+    socket.emit("screen-share-end");
+  }
+
+  screenSharePeers.forEach((peer) => peer.close());
+  screenSharePeers.clear();
+
+  if (screenViewerPeer) {
+    screenViewerPeer.close();
+    screenViewerPeer = null;
+  }
+
+  pendingScreenCandidates.clear();
+  localScreenStream?.getTracks().forEach((track) => track.stop());
+  localScreenStream = null;
+  screenShareActive = false;
+  screenSharerId = null;
+
+  if (screenShareVideo) {
+    screenShareVideo.srcObject = null;
+    screenShareVideo.classList.remove("active");
+  }
+
+  resizeCanvas();
+  setScreenShareStatus("No screen shared");
+  updateScreenShareButtons();
+};
+
+function createScreenSharerPeer(viewerId) {
+  closeScreenSharePeer(viewerId);
+
+  const peer = new RTCPeerConnection(voicePeerConfig);
+  screenSharePeers.set(viewerId, peer);
+
+  localScreenStream.getTracks().forEach((track) => {
+    peer.addTrack(track, localScreenStream);
+  });
+
+  peer.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendScreenSignal(viewerId, event.candidate);
+    }
+  };
+
+  peer.onconnectionstatechange = () => {
+    if (["failed", "closed"].includes(peer.connectionState)) {
+      closeScreenSharePeer(viewerId);
+    }
+  };
+
+  return peer;
+}
+
+async function answerScreenShareOffer(fromId, offer) {
+  screenSharerId = fromId;
+  if (!screenViewerPeer) {
+    screenViewerPeer = createScreenViewerPeer(fromId);
+  }
+
+  await screenViewerPeer.setRemoteDescription(offer);
+  await flushPendingScreenCandidates("screen-sharer", screenViewerPeer);
+  const answer = await screenViewerPeer.createAnswer();
+  await screenViewerPeer.setLocalDescription(answer);
+  sendScreenSignal(fromId, screenViewerPeer.localDescription);
+}
+
+function createScreenViewerPeer(targetId) {
+  const peer = new RTCPeerConnection(voicePeerConfig);
+
+  peer.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendScreenSignal(targetId, event.candidate);
+    }
+  };
+
+  peer.ontrack = (event) => {
+    const stream = event.streams[0] || new MediaStream([event.track]);
+    showScreenStream(stream, false);
+    setScreenShareStatus("Viewing shared screen");
+  };
+
+  peer.onconnectionstatechange = () => {
+    if (["failed", "closed"].includes(peer.connectionState)) {
+      setScreenShareStatus("Screen share reconnecting");
+    }
+  };
+
+  return peer;
+}
+
+function showScreenStream(stream, muted) {
+  if (!screenShareVideo) return;
+
+  screenShareVideo.srcObject = stream;
+  screenShareVideo.muted = muted;
+  screenShareVideo.classList.add("active");
+  resizeCanvas();
+  screenShareVideo.play?.().catch(() => {
+    setScreenShareStatus("Tap video to play");
+  });
+}
+
+function sendScreenSignal(targetId, signal) {
+  socket.emit("screen-signal", {
+    targetId,
+    signal
+  });
+}
+
+async function addScreenIceCandidate(id, peer, candidate) {
+  if (peer.remoteDescription?.type) {
+    await peer.addIceCandidate(candidate);
+    return;
+  }
+
+  const pending = pendingScreenCandidates.get(id) || [];
+  pending.push(candidate);
+  pendingScreenCandidates.set(id, pending);
+}
+
+async function flushPendingScreenCandidates(id, peer) {
+  const pending = pendingScreenCandidates.get(id) || [];
+  if (pending.length === 0) return;
+
+  pendingScreenCandidates.delete(id);
+
+  for (const candidate of pending) {
+    await peer.addIceCandidate(candidate);
+  }
+}
+
+function closeScreenSharePeer(viewerId) {
+  const peer = screenSharePeers.get(viewerId);
+  if (peer) {
+    peer.close();
+    screenSharePeers.delete(viewerId);
+  }
+}
+
+function updateScreenShareButtons() {
+  const canShare = canStartScreenShare();
+  const shouldShowPanel = canShare || Boolean(localScreenStream);
+  const screenSharePanel = document.getElementById("screenSharePanel");
+
+  if (screenSharePanel) {
+    screenSharePanel.classList.toggle("screen-share-hidden", !shouldShowPanel);
+  }
+
+  if (shareScreenButton) {
+    shareScreenButton.disabled = !canShare || Boolean(localScreenStream) || (screenShareActive && screenSharerId !== socket.id);
+  }
+
+  if (stopScreenShareButton) {
+    stopScreenShareButton.disabled = !localScreenStream;
+  }
+}
+
+function setScreenShareStatus(message) {
+  if (screenShareStatus) {
+    screenShareStatus.textContent = message;
+  }
+}
+
 function makeDrawData(x, y, type = "move") {
   return {
     type,
@@ -586,9 +967,16 @@ function getBoardHeightBounds() {
   const callBarHeight = studentCallBar && !studentCallBar.classList.contains("call-hidden")
     ? studentCallBar.getBoundingClientRect().height
     : 0;
+  const screenPanel = document.getElementById("screenSharePanel");
+  const screenPanelHeight = screenPanel && !screenPanel.closest("#toolbar")
+    ? screenPanel.getBoundingClientRect().height
+    : 0;
+  const screenVideoHeight = screenShareVideo?.classList.contains("active")
+    ? screenShareVideo.getBoundingClientRect().height
+    : 0;
   const handleHeight = boardResizeHandle?.getBoundingClientRect().height || 0;
   const minChat = window.matchMedia("(max-width: 700px)").matches ? 72 : 90;
-  const availableHeight = Math.max(260, mainHeight - toolbarHeight - callBarHeight - handleHeight);
+  const availableHeight = Math.max(260, mainHeight - toolbarHeight - callBarHeight - screenPanelHeight - screenVideoHeight - handleHeight);
 
   return {
     min: 180,

@@ -16,6 +16,8 @@ const PORT = process.env.PORT || 3000;
 const roomBoards = new Map();
 const sessions = new Map();
 const roomCalls = new Map();
+const roomScreenShares = new Map();
+const roomScreenPermissions = new Map();
 const teacherPassword = process.env.TEACHER_PASSWORD;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseApiKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -169,6 +171,19 @@ function emitStudentList(room) {
   io.to(room).emit("student-list", getRoomStudents(room));
 }
 
+function getScreenSharePermission(room) {
+  return roomScreenPermissions.get(room) || {
+    enabled: false,
+    studentId: ""
+  };
+}
+
+function emitScreenSharePermission(room) {
+  if (!room) return;
+
+  io.to(room).emit("screen-share-permission", getScreenSharePermission(room));
+}
+
 async function verifyTeacherLogin(username, password) {
   if (supabaseUrl && supabaseApiKey) {
     try {
@@ -309,11 +324,21 @@ io.on("connection", (socket) => {
     const board = roomBoards.get(sessionRoom) || [];
     socket.emit("boardState", board);
     emitStudentList(sessionRoom);
+    socket.emit("screen-share-permission", getScreenSharePermission(sessionRoom));
 
     const call = roomCalls.get(sessionRoom);
     if (call?.active) {
       socket.emit("voice-call-started", {
         teacherId: call.teacherId
+      });
+    }
+
+    const screenShare = roomScreenShares.get(sessionRoom);
+    if (screenShare?.active && screenShare.sharerId !== socket.id) {
+      socket.emit("screen-share-started", {
+        sharerId: screenShare.sharerId,
+        name: screenShare.name,
+        role: screenShare.role
       });
     }
   });
@@ -407,6 +432,90 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("screen-share-start", () => {
+    if (!socket.room || !socket.session) return;
+
+    const permission = getScreenSharePermission(socket.room);
+    const isAllowedTeacher = socket.session.role === "teacher" && permission.enabled;
+    const isAllowedStudent = socket.session.role === "student" && permission.enabled && permission.studentId === socket.id;
+    if (!isAllowedTeacher && !isAllowedStudent) {
+      socket.emit("screen-share-not-allowed");
+      return;
+    }
+
+    const currentShare = roomScreenShares.get(socket.room);
+    if (currentShare?.active && currentShare.sharerId !== socket.id) {
+      socket.emit("screen-share-busy", {
+        name: currentShare.name
+      });
+      return;
+    }
+
+    roomScreenShares.set(socket.room, {
+      active: true,
+      sharerId: socket.id,
+      name: socket.session.name,
+      role: socket.session.role
+    });
+
+    socket.to(socket.room).emit("screen-share-started", {
+      sharerId: socket.id,
+      name: socket.session.name,
+      role: socket.session.role
+    });
+  });
+
+  socket.on("screen-share-permission", (data = {}) => {
+    if (!socket.room || socket.session?.role !== "teacher") return;
+
+    const enabled = Boolean(data.enabled);
+    const requestedStudentId = enabled ? String(data.studentId || "") : "";
+    const studentIds = new Set(getRoomStudents(socket.room).map((student) => student.id));
+    const studentId = studentIds.has(requestedStudentId) ? requestedStudentId : "";
+
+    roomScreenPermissions.set(socket.room, {
+      enabled,
+      studentId
+    });
+    emitScreenSharePermission(socket.room);
+  });
+
+  socket.on("screen-share-end", () => {
+    if (!socket.room || !socket.session) return;
+
+    const currentShare = roomScreenShares.get(socket.room);
+    if (currentShare?.sharerId !== socket.id) return;
+
+    roomScreenShares.delete(socket.room);
+    socket.to(socket.room).emit("screen-share-ended");
+  });
+
+  socket.on("screen-share-watch", () => {
+    if (!socket.room || !socket.session) return;
+
+    const currentShare = roomScreenShares.get(socket.room);
+    if (!currentShare?.active || currentShare.sharerId === socket.id) return;
+
+    io.to(currentShare.sharerId).emit("screen-share-viewer-joined", {
+      viewerId: socket.id,
+      name: socket.session.name,
+      role: socket.session.role
+    });
+  });
+
+  socket.on("screen-signal", (data) => {
+    if (!socket.room || !socket.session || !data?.targetId || !data?.signal) return;
+
+    const targetSocket = io.sockets.sockets.get(data.targetId);
+    if (!targetSocket || targetSocket.room !== socket.room) return;
+
+    io.to(data.targetId).emit("screen-signal", {
+      fromId: socket.id,
+      role: socket.session.role,
+      signal: data.signal
+    });
+  });
+
   socket.on("disconnect", () => {
     const disconnectedRoom = socket.room;
 
@@ -415,6 +524,29 @@ io.on("connection", (socket) => {
       if (call?.teacherId === socket.id) {
         roomCalls.delete(socket.room);
         socket.to(socket.room).emit("voice-call-ended");
+      }
+
+      roomScreenPermissions.delete(socket.room);
+      socket.to(socket.room).emit("screen-share-permission", {
+        enabled: false,
+        studentId: ""
+      });
+    }
+
+    if (socket.room) {
+      const currentShare = roomScreenShares.get(socket.room);
+      if (currentShare?.sharerId === socket.id) {
+        roomScreenShares.delete(socket.room);
+        socket.to(socket.room).emit("screen-share-ended");
+      }
+
+      const permission = roomScreenPermissions.get(socket.room);
+      if (permission?.studentId === socket.id) {
+        roomScreenPermissions.set(socket.room, {
+          enabled: permission.enabled,
+          studentId: ""
+        });
+        emitScreenSharePermission(socket.room);
       }
     }
 
