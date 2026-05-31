@@ -188,6 +188,16 @@ socket.on("voice-call-ended", () => {
   stopVoiceCall(false);
 });
 
+socket.on("student-session-blocked", (data = {}) => {
+  sessionStorage.setItem("loginMessage", data.message || "This student is already connected from another device or browser.");
+  window.location.href = "/logout";
+});
+
+socket.on("student-session-replaced", (data = {}) => {
+  sessionStorage.setItem("loginMessage", data.message || "This student session was opened in another tab.");
+  window.location.href = "/logout";
+});
+
 socket.on("screen-share-started", (data = {}) => {
   screenShareActive = true;
   screenSharerId = data.sharerId || null;

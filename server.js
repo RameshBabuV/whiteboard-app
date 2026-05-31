@@ -18,6 +18,7 @@ const sessions = new Map();
 const roomCalls = new Map();
 const roomScreenShares = new Map();
 const roomScreenPermissions = new Map();
+const activeStudentConnections = new Map();
 const teacherPassword = process.env.TEACHER_PASSWORD;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseApiKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -193,6 +194,29 @@ function getRoomViewerSockets(room, sharerId) {
     .filter((roomSocket) => roomSocket?.session);
 }
 
+function getStudentConnectionKey(room, studentId) {
+  return `${room}:${studentId}`;
+}
+
+function getActiveStudentConnection(room, studentId) {
+  if (!room || !studentId) return null;
+
+  const key = getStudentConnectionKey(room, studentId);
+  const activeConnection = activeStudentConnections.get(key);
+  if (!activeConnection) return null;
+
+  const activeSocket = io.sockets.sockets.get(activeConnection.socketId);
+  if (!activeSocket?.connected) {
+    activeStudentConnections.delete(key);
+    return null;
+  }
+
+  return {
+    ...activeConnection,
+    socket: activeSocket
+  };
+}
+
 async function verifyTeacherLogin(username, password) {
   if (supabaseUrl && supabaseApiKey) {
     try {
@@ -306,6 +330,10 @@ app.post("/api/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid student login, inactive enrollment, or online class access is disabled." });
     }
 
+    if (getActiveStudentConnection(room, student.id)) {
+      return res.status(409).json({ error: "This student is already connected from another device or browser." });
+    }
+
     sessionName = student.display_name || student.username || name;
   }
 
@@ -382,9 +410,38 @@ io.on("connection", (socket) => {
       role: effectiveRole
     };
     const sessionRoom = sanitizeRoom(session.room || requestedRoom || "python");
+
+    if (effectiveSession.role === "student" && effectiveSession.studentId) {
+      const activeConnection = getActiveStudentConnection(sessionRoom, effectiveSession.studentId);
+
+      if (activeConnection && activeConnection.sessionId !== effectiveSession.id) {
+        socket.emit("student-session-blocked", {
+          message: "This student is already connected from another device or browser."
+        });
+        socket.disconnect(true);
+        return;
+      }
+
+      if (activeConnection && activeConnection.socketId !== socket.id) {
+        activeConnection.socket.emit("student-session-replaced", {
+          message: "This student session was opened in another tab."
+        });
+        activeConnection.socket.disconnect(true);
+      }
+    }
+
     socket.join(sessionRoom);
     socket.room = sessionRoom;
     socket.session = effectiveSession;
+
+    if (effectiveSession.role === "student" && effectiveSession.studentId) {
+      activeStudentConnections.set(getStudentConnectionKey(sessionRoom, effectiveSession.studentId), {
+        socketId: socket.id,
+        sessionId: effectiveSession.id,
+        connectedAt: Date.now()
+      });
+    }
+
     console.log("Joined room:", sessionRoom);
 
     const board = roomBoards.get(sessionRoom) || [];
@@ -610,6 +667,14 @@ io.on("connection", (socket) => {
     }
 
     if (socket.room) {
+      if (socket.session?.role === "student" && socket.session.studentId) {
+        const key = getStudentConnectionKey(socket.room, socket.session.studentId);
+        const activeConnection = activeStudentConnections.get(key);
+        if (activeConnection?.socketId === socket.id) {
+          activeStudentConnections.delete(key);
+        }
+      }
+
       const currentShare = roomScreenShares.get(socket.room);
       if (currentShare?.sharerId === socket.id) {
         roomScreenShares.delete(socket.room);

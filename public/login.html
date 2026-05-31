@@ -58,6 +58,12 @@ roleInput.value = params.get("role") || "student";
 roomInput.value = params.get("room") || "python";
 togglePasswordField();
 
+const storedLoginMessage = sessionStorage.getItem("loginMessage");
+if (storedLoginMessage) {
+  msg.textContent = storedLoginMessage;
+  sessionStorage.removeItem("loginMessage");
+}
+
 roleInput.addEventListener("change", togglePasswordField);
 
 form.addEventListener("submit", async (e) => {
