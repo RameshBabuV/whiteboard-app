@@ -184,6 +184,15 @@ function emitScreenSharePermission(room) {
   io.to(room).emit("screen-share-permission", getScreenSharePermission(room));
 }
 
+function getRoomViewerSockets(room, sharerId) {
+  const roomSockets = io.sockets.adapter.rooms.get(room) || new Set();
+
+  return [...roomSockets]
+    .filter((socketId) => socketId !== sharerId)
+    .map((socketId) => io.sockets.sockets.get(socketId))
+    .filter((roomSocket) => roomSocket?.session);
+}
+
 async function verifyTeacherLogin(username, password) {
   if (supabaseUrl && supabaseApiKey) {
     try {
@@ -338,7 +347,8 @@ io.on("connection", (socket) => {
       socket.emit("screen-share-started", {
         sharerId: screenShare.sharerId,
         name: screenShare.name,
-        role: screenShare.role
+        role: screenShare.role,
+        offerIncoming: false
       });
     }
   });
@@ -458,10 +468,19 @@ io.on("connection", (socket) => {
       role: socket.session.role
     });
 
-    socket.to(socket.room).emit("screen-share-started", {
-      sharerId: socket.id,
-      name: socket.session.name,
-      role: socket.session.role
+    getRoomViewerSockets(socket.room, socket.id).forEach((viewerSocket) => {
+      viewerSocket.emit("screen-share-started", {
+        sharerId: socket.id,
+        name: socket.session.name,
+        role: socket.session.role,
+        offerIncoming: true
+      });
+
+      socket.emit("screen-share-viewer-joined", {
+        viewerId: viewerSocket.id,
+        name: viewerSocket.session.name,
+        role: viewerSocket.session.role
+      });
     });
   });
 

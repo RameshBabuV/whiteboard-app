@@ -190,7 +190,7 @@ socket.on("screen-share-started", (data = {}) => {
   updateScreenShareButtons();
   setScreenShareStatus(`${data.name || "Someone"} is sharing`);
 
-  if (screenSharerId && screenSharerId !== socket.id) {
+  if (screenSharerId && screenSharerId !== socket.id && !data.offerIncoming) {
     socket.emit("screen-share-watch");
   }
 });
@@ -656,7 +656,10 @@ function renderStudentRadioList() {
   if (role !== "teacher") return;
 
   if (studentPickerSummary) {
-    studentPickerSummary.textContent = `Students: ${connectedStudents.length}`;
+    const selectedStudent = connectedStudents.find((student) => student.id === selectedScreenShareStudentId);
+    studentPickerSummary.textContent = selectedStudent
+      ? `Students: ${connectedStudents.length} - ${selectedStudent.name || "Student"}`
+      : `Students: ${connectedStudents.length}`;
   }
 
   if (!studentRadioList) return;
