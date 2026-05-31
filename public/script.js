@@ -39,6 +39,7 @@ const endCallButton = document.getElementById("endCall");
 const studentCallBar = document.getElementById("studentCallBar");
 const studentMuteToggleButton = document.getElementById("studentMuteToggle");
 const callStatus = document.getElementById("callStatus");
+const studentList = document.getElementById("studentList");
 
 let boardEvents = [];
 let undoStack = [];
@@ -163,6 +164,23 @@ socket.on("voice-call-started", (data = {}) => {
 
 socket.on("voice-call-ended", () => {
   stopVoiceCall(false);
+});
+
+socket.on("student-list", (students = []) => {
+  if (role !== "teacher" || !studentList) return;
+
+  studentList.innerHTML = "";
+  const summary = document.createElement("option");
+  summary.textContent = `Students: ${students.length}`;
+  summary.value = "";
+  studentList.appendChild(summary);
+
+  students.forEach((student) => {
+    const option = document.createElement("option");
+    option.textContent = student.name || "Student";
+    option.value = student.id || "";
+    studentList.appendChild(option);
+  });
 });
 
 socket.on("voice-call-student-joined", async ({ studentId, name }) => {

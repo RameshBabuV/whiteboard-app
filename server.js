@@ -150,6 +150,25 @@ function getSocketSession(socket) {
   return getSessionByCookieValue(cookies.board_session);
 }
 
+function getRoomStudents(room) {
+  const roomSockets = io.sockets.adapter.rooms.get(room) || new Set();
+
+  return [...roomSockets]
+    .map((socketId) => io.sockets.sockets.get(socketId))
+    .filter((roomSocket) => roomSocket?.session?.role === "student")
+    .map((roomSocket) => ({
+      id: roomSocket.id,
+      name: roomSocket.session.name
+    }))
+    .sort((first, second) => first.name.localeCompare(second.name));
+}
+
+function emitStudentList(room) {
+  if (!room) return;
+
+  io.to(room).emit("student-list", getRoomStudents(room));
+}
+
 async function verifyTeacherLogin(username, password) {
   if (supabaseUrl && supabaseApiKey) {
     try {
@@ -289,6 +308,7 @@ io.on("connection", (socket) => {
 
     const board = roomBoards.get(sessionRoom) || [];
     socket.emit("boardState", board);
+    emitStudentList(sessionRoom);
 
     const call = roomCalls.get(sessionRoom);
     if (call?.active) {
@@ -388,6 +408,8 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
+    const disconnectedRoom = socket.room;
+
     if (socket.session?.role === "teacher" && socket.room) {
       const call = roomCalls.get(socket.room);
       if (call?.teacherId === socket.id) {
@@ -396,6 +418,7 @@ io.on("connection", (socket) => {
       }
     }
 
+    emitStudentList(disconnectedRoom);
     console.log("User disconnected");
   });
   socket.on("chat", (data) => {

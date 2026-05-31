@@ -16,10 +16,10 @@ body {
   background: #2c3e50;
   padding: 8px 10px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 220px auto;
   grid-template-areas:
-    "primary call"
-    "secondary call";
+    "primary students call"
+    "secondary students call";
   column-gap: 10px;
   row-gap: 6px;
   align-items: center;
@@ -114,6 +114,27 @@ body {
   font-size: 14px;
   font-weight: 700;
   padding: 0 4px;
+}
+
+.student-presence-box {
+  grid-area: students;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border: 2px solid #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+}
+
+#studentList {
+  width: 100%;
+  height: 36px;
+  border: none;
+  background: #ffffff;
+  color: #111;
+  padding: 0 8px;
+  box-sizing: border-box;
 }
 
 .teacher-call-box {
@@ -438,8 +459,15 @@ footer {
     grid-template-areas:
       "primary"
       "secondary"
+      "students"
       "call";
     row-gap: 6px;
+  }
+
+  .student-presence-box {
+    justify-self: start;
+    width: min(220px, 100%);
+    padding: 6px;
   }
 
   .teacher-call-box {
