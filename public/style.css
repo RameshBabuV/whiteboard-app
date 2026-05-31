@@ -1,12 +1,14 @@
 body {
   margin: 0;
   font-family: Arial, sans-serif;
+  overflow: hidden;
 }
 
 #main {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   position: relative;
 }
 
@@ -121,9 +123,12 @@ body {
 
 canvas {
   flex: 1;
+  min-height: 0;
+  width: 100%;
   border: 2px solid #000;
   box-sizing: border-box;
   touch-action: none;
+  display: block;
 }
 
 #boardTextEditor {
@@ -144,6 +149,7 @@ canvas {
 /* Chat */
 #chatContainer {
   height: 220px;
+  flex: 0 0 220px;
   display: flex;
   flex-direction: column;
   background: #f4f4f4;
@@ -188,6 +194,7 @@ canvas {
 }
 
 #chatInput input {
+  min-width: 0;
   flex: 1;
   padding: 10px;
   border: none;
@@ -287,4 +294,59 @@ footer {
 #msg {
   min-height: 20px;
   color: #b42318;
+}
+
+@media (max-width: 700px) {
+  body {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+  }
+
+  #main {
+    height: 100svh;
+    height: 100dvh;
+  }
+
+  #toolbar {
+    padding: 6px;
+    gap: 6px;
+  }
+
+  .toolbar-row {
+    gap: 6px;
+  }
+
+  .toolbar-row button,
+  .toolbar-row input,
+  .toolbar-row select {
+    height: 36px;
+  }
+
+  .toolbar-row button {
+    padding: 0 8px;
+  }
+
+  #toolSelect {
+    min-width: 150px;
+  }
+
+  #chatContainer {
+    height: 150px;
+    flex-basis: 150px;
+  }
+
+  #chatBox {
+    padding: 6px;
+  }
+
+  .message {
+    max-width: 88%;
+    font-size: 13px;
+  }
+
+  #chatInput input,
+  #chatInput button {
+    padding: 8px;
+  }
 }

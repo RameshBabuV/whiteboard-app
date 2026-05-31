@@ -18,6 +18,7 @@ const sessions = new Map();
 const teacherPassword = process.env.TEACHER_PASSWORD;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseApiKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+const sessionSecret = process.env.SESSION_SECRET || "local-session-secret";
 
 function loadEnvFile() {
   const envFiles = [
@@ -74,7 +75,7 @@ function getSessionId(req) {
 
 function getSession(req) {
   const sessionId = getSessionId(req);
-  return sessionId ? sessions.get(sessionId) : null;
+  return getSessionByCookieValue(sessionId);
 }
 
 function requireRole(...allowedRoles) {
@@ -91,9 +92,52 @@ function requireRole(...allowedRoles) {
   };
 }
 
-function buildSessionCookie(sessionId) {
+function getSessionByCookieValue(cookieValue) {
+  if (!cookieValue) return null;
+
+  const signedSession = parseSignedSession(cookieValue);
+  if (signedSession) return signedSession;
+
+  return sessions.get(cookieValue) || null;
+}
+
+function signSession(session) {
+  const payload = Buffer.from(JSON.stringify(session)).toString("base64url");
+  const signature = crypto
+    .createHmac("sha256", sessionSecret)
+    .update(payload)
+    .digest("base64url");
+
+  return `${payload}.${signature}`;
+}
+
+function parseSignedSession(cookieValue) {
+  const [payload, signature] = String(cookieValue).split(".");
+  if (!payload || !signature) return null;
+
+  const expectedSignature = crypto
+    .createHmac("sha256", sessionSecret)
+    .update(payload)
+    .digest("base64url");
+
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+
+  if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function buildSessionCookie(session) {
+  const sessionValue = signSession(session);
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `board_session=${encodeURIComponent(sessionId)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`;
+  return `board_session=${encodeURIComponent(sessionValue)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`;
 }
 
 function sanitizeRoom(room) {
@@ -102,7 +146,7 @@ function sanitizeRoom(room) {
 
 function getSocketSession(socket) {
   const cookies = parseCookies(socket.handshake.headers.cookie);
-  return cookies.board_session ? sessions.get(cookies.board_session) : null;
+  return getSessionByCookieValue(cookies.board_session);
 }
 
 async function verifyTeacherLogin(username, password) {
@@ -179,15 +223,18 @@ app.post("/api/login", async (req, res) => {
   }
 
   const sessionId = crypto.randomUUID();
-  sessions.set(sessionId, {
+  const session = {
+    id: sessionId,
     name: sessionName,
     role,
     room,
     teacherId: teacher?.id,
     createdAt: Date.now()
-  });
+  };
 
-  res.setHeader("Set-Cookie", buildSessionCookie(sessionId));
+  sessions.set(sessionId, session);
+
+  res.setHeader("Set-Cookie", buildSessionCookie(session));
   res.json({
     redirectTo: role === "teacher"
       ? `/teacher.html?room=${encodeURIComponent(room)}`
@@ -233,12 +280,13 @@ io.on("connection", (socket) => {
   socket.on("joinRoom", (room) => {
     if (!session) return;
 
-    socket.join(room);
-    socket.room = room;
+    const sessionRoom = sanitizeRoom(session.room || room || "python");
+    socket.join(sessionRoom);
+    socket.room = sessionRoom;
     socket.session = session;
-    console.log("Joined room:", room);
+    console.log("Joined room:", sessionRoom);
 
-    const board = roomBoards.get(room) || [];
+    const board = roomBoards.get(sessionRoom) || [];
     socket.emit("boardState", board);
   });
 
