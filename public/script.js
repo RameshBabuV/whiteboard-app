@@ -160,7 +160,10 @@ updateToolbarState();
 updateScreenShareButtons();
 applySavedBoardHeight();
 resizeCanvas();
-socket.emit("joinRoom", room);
+socket.emit("joinRoom", {
+  room,
+  pageRole: role
+});
 
 socket.on("voice-call-started", (data = {}) => {
   voiceCallActive = true;
@@ -637,6 +640,14 @@ window.toggleScreenSharePermission = function () {
 
 function canStartScreenShare() {
   if (role === "teacher") {
+    return screenSharePermissionEnabled && connectedStudents.length > 0;
+  }
+
+  return screenShareAllowed;
+}
+
+function canShowScreenShareControls() {
+  if (role === "teacher") {
     return screenSharePermissionEnabled;
   }
 
@@ -701,7 +712,9 @@ function renderStudentRadioList() {
 
 window.startScreenShare = async function () {
   if (!canStartScreenShare()) {
-    setScreenShareStatus("Enable screen share first");
+    setScreenShareStatus(role === "teacher" && screenSharePermissionEnabled
+      ? "Connect a student first"
+      : "Enable screen share first");
     updateScreenShareButtons();
     return;
   }
@@ -720,7 +733,7 @@ window.startScreenShare = async function () {
     });
     screenShareActive = true;
     screenSharerId = socket.id;
-    showScreenStream(localScreenStream, true);
+    hideScreenStream();
     setScreenShareStatus("You are sharing");
     updateScreenShareButtons();
     localScreenStream.getVideoTracks()[0]?.addEventListener("ended", () => stopScreenShare(true));
@@ -753,8 +766,7 @@ window.stopScreenShare = function (notifyServer = true) {
   screenSharerId = null;
 
   if (screenShareVideo) {
-    screenShareVideo.srcObject = null;
-    screenShareVideo.classList.remove("active");
+    hideScreenStream();
   }
 
   resizeCanvas();
@@ -836,6 +848,14 @@ function showScreenStream(stream, muted) {
   });
 }
 
+function hideScreenStream() {
+  if (!screenShareVideo) return;
+
+  screenShareVideo.srcObject = null;
+  screenShareVideo.classList.remove("active");
+  resizeCanvas();
+}
+
 function sendScreenSignal(targetId, signal) {
   socket.emit("screen-signal", {
     targetId,
@@ -875,11 +895,15 @@ function closeScreenSharePeer(viewerId) {
 
 function updateScreenShareButtons() {
   const canShare = canStartScreenShare();
-  const shouldShowPanel = canShare || Boolean(localScreenStream);
+  const shouldShowPanel = canShowScreenShareControls() || Boolean(localScreenStream);
   const screenSharePanel = document.getElementById("screenSharePanel");
 
   if (screenSharePanel) {
     screenSharePanel.classList.toggle("screen-share-hidden", !shouldShowPanel);
+  }
+
+  if (role === "teacher" && screenSharePermissionEnabled && connectedStudents.length === 0 && !localScreenStream) {
+    setScreenShareStatus("Connect a student first");
   }
 
   if (shareScreenButton) {

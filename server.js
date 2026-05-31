@@ -321,13 +321,22 @@ io.on("connection", (socket) => {
   console.log("User connected");
   const session = getSocketSession(socket);
 
-  socket.on("joinRoom", (room) => {
+  socket.on("joinRoom", (data) => {
     if (!session) return;
 
-    const sessionRoom = sanitizeRoom(session.room || room || "python");
+    const requestedRoom = typeof data === "object" && data !== null ? data.room : data;
+    const pageRole = typeof data === "object" && data !== null ? data.pageRole : "";
+    const effectiveRole = pageRole === "student" && session.role === "teacher"
+      ? "student"
+      : session.role;
+    const effectiveSession = {
+      ...session,
+      role: effectiveRole
+    };
+    const sessionRoom = sanitizeRoom(session.room || requestedRoom || "python");
     socket.join(sessionRoom);
     socket.room = sessionRoom;
-    socket.session = session;
+    socket.session = effectiveSession;
     console.log("Joined room:", sessionRoom);
 
     const board = roomBoards.get(sessionRoom) || [];
