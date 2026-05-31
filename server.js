@@ -232,6 +232,40 @@ async function verifyTeacherLogin(username, password) {
   return null;
 }
 
+async function verifyStudentLogin(username, password, room) {
+  if (supabaseUrl && supabaseApiKey) {
+    try {
+      const response = await fetch(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/verify_student_login`, {
+        method: "POST",
+        headers: {
+          apikey: supabaseApiKey,
+          Authorization: `Bearer ${supabaseApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          p_username: username,
+          p_password: password,
+          p_room: room
+        })
+      });
+
+      if (!response.ok) {
+        console.error("Supabase student login failed:", response.status, await response.text());
+        return null;
+      }
+
+      const students = await response.json();
+      return Array.isArray(students) && students.length > 0 ? students[0] : null;
+    } catch (error) {
+      console.error("Supabase student login error:", error);
+      return null;
+    }
+  }
+
+  console.error("Student login is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+  return null;
+}
+
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
@@ -255,6 +289,7 @@ app.post("/api/login", async (req, res) => {
 
   let sessionName = name;
   let teacher = null;
+  let student = null;
 
   if (role === "teacher") {
     teacher = await verifyTeacherLogin(name, password);
@@ -264,6 +299,14 @@ app.post("/api/login", async (req, res) => {
     }
 
     sessionName = teacher.display_name || teacher.username || name;
+  } else {
+    student = await verifyStudentLogin(name, password, room);
+
+    if (!student) {
+      return res.status(401).json({ error: "Invalid student login, inactive enrollment, or online class access is disabled." });
+    }
+
+    sessionName = student.display_name || student.username || name;
   }
 
   const sessionId = crypto.randomUUID();
@@ -273,6 +316,13 @@ app.post("/api/login", async (req, res) => {
     role,
     room,
     teacherId: teacher?.id,
+    studentId: student?.id,
+    enrollment: student ? {
+      roomSlug: student.room_slug,
+      feesAmount: student.fees_amount,
+      paymentStatus: student.payment_status,
+      allowOnlineClasses: student.allow_online_classes
+    } : undefined,
     createdAt: Date.now()
   };
 
@@ -311,7 +361,7 @@ app.get("/teacher.html", requireRole("teacher"), (req, res) => {
   res.sendFile(path.join(__dirname, "public", "teacher.html"));
 });
 
-app.get("/student.html", requireRole("student", "teacher"), (req, res) => {
+app.get("/student.html", requireRole("student"), (req, res) => {
   res.sendFile(path.join(__dirname, "public", "student.html"));
 });
 
@@ -326,9 +376,7 @@ io.on("connection", (socket) => {
 
     const requestedRoom = typeof data === "object" && data !== null ? data.room : data;
     const pageRole = typeof data === "object" && data !== null ? data.pageRole : "";
-    const effectiveRole = pageRole === "student" && session.role === "teacher"
-      ? "student"
-      : session.role;
+    const effectiveRole = session.role;
     const effectiveSession = {
       ...session,
       role: effectiveRole

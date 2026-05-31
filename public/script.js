@@ -37,6 +37,7 @@ const tableColsInput = document.getElementById("tableCols");
 const startCallButton = document.getElementById("startCall");
 const endCallButton = document.getElementById("endCall");
 const studentCallBar = document.getElementById("studentCallBar");
+const studentTopBar = document.getElementById("studentTopBar");
 const studentMuteToggleButton = document.getElementById("studentMuteToggle");
 const callStatus = document.getElementById("callStatus");
 const screenShareToggle = document.getElementById("screenShareToggle");
@@ -774,6 +775,10 @@ window.stopScreenShare = function (notifyServer = true) {
   updateScreenShareButtons();
 };
 
+window.leaveStudentBoard = function () {
+  window.location.href = "/logout";
+};
+
 function createScreenSharerPeer(viewerId) {
   closeScreenSharePeer(viewerId);
 
@@ -991,6 +996,7 @@ function setBoardDisplayHeight(height) {
 function getBoardHeightBounds() {
   const mainHeight = document.getElementById("main")?.getBoundingClientRect().height || window.innerHeight;
   const toolbarHeight = document.getElementById("toolbar")?.getBoundingClientRect().height || 0;
+  const studentTopBarHeight = studentTopBar?.getBoundingClientRect().height || 0;
   const callBarHeight = studentCallBar && !studentCallBar.classList.contains("call-hidden")
     ? studentCallBar.getBoundingClientRect().height
     : 0;
@@ -1003,7 +1009,7 @@ function getBoardHeightBounds() {
     : 0;
   const handleHeight = boardResizeHandle?.getBoundingClientRect().height || 0;
   const minChat = window.matchMedia("(max-width: 700px)").matches ? 72 : 90;
-  const availableHeight = Math.max(260, mainHeight - toolbarHeight - callBarHeight - screenPanelHeight - screenVideoHeight - handleHeight);
+  const availableHeight = Math.max(260, mainHeight - toolbarHeight - studentTopBarHeight - callBarHeight - screenPanelHeight - screenVideoHeight - handleHeight);
 
   return {
     min: 180,

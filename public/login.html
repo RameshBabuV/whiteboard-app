@@ -35,7 +35,7 @@
     </label>
 
     <label id="passwordField">
-      Teacher Password
+      <span id="passwordLabel">Password</span>
       <input id="password" name="password" type="password" autocomplete="current-password">
     </label>
 
@@ -50,6 +50,7 @@ const form = document.getElementById("loginForm");
 const roleInput = document.getElementById("role");
 const roomInput = document.getElementById("room");
 const passwordField = document.getElementById("passwordField");
+const passwordLabel = document.getElementById("passwordLabel");
 const nameLabel = document.getElementById("nameLabel");
 const msg = document.getElementById("msg");
 
@@ -88,10 +89,11 @@ form.addEventListener("submit", async (e) => {
 
 function togglePasswordField() {
   const isTeacher = roleInput.value === "teacher";
-  passwordField.style.display = isTeacher ? "block" : "none";
-  form.password.required = isTeacher;
-  nameLabel.textContent = isTeacher ? "Teacher Username" : "Name";
-  form.name.autocomplete = isTeacher ? "username" : "name";
+  passwordField.style.display = "block";
+  form.password.required = true;
+  passwordLabel.textContent = isTeacher ? "Teacher Password" : "Student Password";
+  nameLabel.textContent = isTeacher ? "Teacher Username" : "Student Username";
+  form.name.autocomplete = "username";
 }
 </script>
 
