@@ -15,6 +15,7 @@ const io = socketIo(server, {
 const PORT = process.env.PORT || 3000;
 const roomBoards = new Map();
 const sessions = new Map();
+const roomCalls = new Map();
 const teacherPassword = process.env.TEACHER_PASSWORD;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseApiKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -288,6 +289,13 @@ io.on("connection", (socket) => {
 
     const board = roomBoards.get(sessionRoom) || [];
     socket.emit("boardState", board);
+
+    const call = roomCalls.get(sessionRoom);
+    if (call?.active) {
+      socket.emit("voice-call-started", {
+        teacherId: call.teacherId
+      });
+    }
   });
 
   socket.on("draw", (data) => {
@@ -332,7 +340,62 @@ io.on("connection", (socket) => {
     socket.to(socket.room).emit("clear");
   });
 
+  socket.on("voice-call-start", () => {
+    if (!socket.room) return;
+    if (socket.session?.role !== "teacher") return;
+
+    roomCalls.set(socket.room, {
+      active: true,
+      teacherId: socket.id
+    });
+    socket.to(socket.room).emit("voice-call-started", {
+      teacherId: socket.id
+    });
+  });
+
+  socket.on("voice-call-end", () => {
+    if (!socket.room) return;
+    if (socket.session?.role !== "teacher") return;
+
+    roomCalls.delete(socket.room);
+    socket.to(socket.room).emit("voice-call-ended");
+  });
+
+  socket.on("voice-call-join", () => {
+    if (!socket.room || !socket.session) return;
+    if (socket.session.role !== "student") return;
+
+    const call = roomCalls.get(socket.room);
+    if (!call?.active) return;
+
+    io.to(call.teacherId).emit("voice-call-student-joined", {
+      studentId: socket.id,
+      name: socket.session.name
+    });
+  });
+
+  socket.on("voice-signal", (data) => {
+    if (!socket.room || !socket.session || !data?.targetId || !data?.signal) return;
+
+    const targetSocket = io.sockets.sockets.get(data.targetId);
+    if (!targetSocket || targetSocket.room !== socket.room) return;
+
+    io.to(data.targetId).emit("voice-signal", {
+      fromId: socket.id,
+      role: socket.session.role,
+      signal: data.signal
+    });
+  });
+
   socket.on("disconnect", () => {
+    if (socket.session?.role === "teacher" && socket.room) {
+      const call = roomCalls.get(socket.room);
+      if (call?.teacherId === socket.id) {
+        roomCalls.delete(socket.room);
+        socket.to(socket.room).emit("voice-call-ended");
+      }
+    }
+
     console.log("User disconnected");
   });
   socket.on("chat", (data) => {

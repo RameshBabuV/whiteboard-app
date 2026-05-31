@@ -33,11 +33,22 @@ const undoBoardButton = document.getElementById("undoBoard");
 const redoBoardButton = document.getElementById("redoBoard");
 const tableRowsInput = document.getElementById("tableRows");
 const tableColsInput = document.getElementById("tableCols");
+const startCallButton = document.getElementById("startCall");
+const endCallButton = document.getElementById("endCall");
+const studentCallBar = document.getElementById("studentCallBar");
+const studentMuteToggleButton = document.getElementById("studentMuteToggle");
+const callStatus = document.getElementById("callStatus");
 
 let boardEvents = [];
 let undoStack = [];
 let redoStack = [];
 const maxHistoryItems = 50;
+const voicePeerConfig = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" }
+  ]
+};
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
@@ -67,6 +78,15 @@ let shapeInteraction = null;
 let selectedBoardObjectId = null;
 let boardObjectInteraction = null;
 let moveMode = false;
+let voiceCallActive = false;
+let localVoiceStream = null;
+let teacherSocketId = null;
+let studentVoicePeer = null;
+let studentVoiceJoined = false;
+let studentMuted = true;
+const teacherVoicePeers = new Map();
+const remoteVoiceAudios = new Map();
+const pendingVoiceCandidates = new Map();
 const imageCache = new Map();
 let textStyles = {
   bold: false,
@@ -107,6 +127,328 @@ window.addEventListener("resize", resizeCanvas);
 updateToolbarState();
 resizeCanvas();
 socket.emit("joinRoom", room);
+
+socket.on("voice-call-started", (data = {}) => {
+  voiceCallActive = true;
+  teacherSocketId = data.teacherId || null;
+
+  if (role === "student") {
+    studentCallBar?.classList.remove("call-hidden");
+    if (studentMuteToggleButton) {
+      studentMuteToggleButton.disabled = false;
+    }
+    setCallStatus("Teacher call started");
+    updateStudentMuteButton();
+  }
+
+  if (role === "teacher") {
+    updateTeacherCallButtons();
+  }
+});
+
+socket.on("voice-call-ended", () => {
+  stopVoiceCall(false);
+});
+
+socket.on("voice-call-student-joined", async ({ studentId, name }) => {
+  if (role !== "teacher" || !voiceCallActive || !localVoiceStream || !studentId) return;
+
+  const peer = createTeacherVoicePeer(studentId, name);
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+  sendVoiceSignal(studentId, peer.localDescription);
+});
+
+socket.on("voice-signal", async ({ fromId, signal }) => {
+  if (!fromId || !signal) return;
+
+  if (role === "teacher") {
+    const peer = teacherVoicePeers.get(fromId);
+    if (!peer) return;
+
+    if (signal.type === "answer") {
+      await peer.setRemoteDescription(signal);
+      await flushPendingVoiceCandidates(fromId, peer);
+    } else if (signal.candidate) {
+      await addVoiceIceCandidate(fromId, peer, signal);
+    }
+    return;
+  }
+
+  if (role === "student") {
+    if (signal.type === "offer") {
+      await answerTeacherVoiceOffer(fromId, signal);
+    } else if (signal.candidate) {
+      if (studentVoicePeer) {
+        await addVoiceIceCandidate("teacher", studentVoicePeer, signal);
+      } else {
+        const pending = pendingVoiceCandidates.get("teacher") || [];
+        pending.push(signal);
+        pendingVoiceCandidates.set("teacher", pending);
+      }
+    }
+  }
+});
+
+window.startVoiceCall = async function () {
+  if (role !== "teacher" || voiceCallActive) return;
+
+  try {
+    localVoiceStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    voiceCallActive = true;
+    socket.emit("voice-call-start");
+    setCallStatus("Voice connected");
+    updateTeacherCallButtons();
+  } catch (error) {
+    console.error("Unable to start voice call:", error);
+    setCallStatus("Mic permission needed");
+  }
+};
+
+window.endVoiceCall = function () {
+  if (role !== "teacher") return;
+
+  socket.emit("voice-call-end");
+  stopVoiceCall(false);
+};
+
+window.toggleStudentMute = async function () {
+  if (role !== "student" || !voiceCallActive) return;
+
+  try {
+    if (!studentVoiceJoined) {
+      localVoiceStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      studentVoiceJoined = true;
+      studentMuted = false;
+      setLocalVoiceMuted(false);
+      socket.emit("voice-call-join");
+      setCallStatus("Voice connected");
+      updateStudentMuteButton();
+      return;
+    }
+
+    studentMuted = !studentMuted;
+    setLocalVoiceMuted(studentMuted);
+    setCallStatus(studentMuted ? "Muted" : "Unmuted");
+    updateStudentMuteButton();
+  } catch (error) {
+    console.error("Unable to access microphone:", error);
+    setCallStatus("Mic permission needed");
+  }
+};
+
+function createTeacherVoicePeer(studentId, name = "Student") {
+  closeTeacherVoicePeer(studentId);
+
+  const peer = new RTCPeerConnection(voicePeerConfig);
+  teacherVoicePeers.set(studentId, peer);
+
+  localVoiceStream.getTracks().forEach((track) => {
+    peer.addTrack(track, localVoiceStream);
+  });
+
+  peer.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendVoiceSignal(studentId, event.candidate);
+    }
+  };
+
+  peer.ontrack = (event) => {
+    attachRemoteVoice(studentId, event.streams[0], name);
+  };
+
+  peer.onconnectionstatechange = () => {
+    if (["failed", "closed", "disconnected"].includes(peer.connectionState)) {
+      closeTeacherVoicePeer(studentId);
+    }
+  };
+
+  setCallStatus(`Voice connected (${teacherVoicePeers.size})`);
+  return peer;
+}
+
+async function answerTeacherVoiceOffer(fromId, offer) {
+  teacherSocketId = fromId;
+  if (!studentVoicePeer) {
+    studentVoicePeer = createStudentVoicePeer(fromId);
+  }
+
+  if (localVoiceStream) {
+    localVoiceStream.getTracks().forEach((track) => {
+      const alreadyAdded = studentVoicePeer.getSenders().some((sender) => sender.track === track);
+      if (!alreadyAdded) {
+        studentVoicePeer.addTrack(track, localVoiceStream);
+      }
+    });
+  }
+
+  await studentVoicePeer.setRemoteDescription(offer);
+  await flushPendingVoiceCandidates("teacher", studentVoicePeer);
+  const answer = await studentVoicePeer.createAnswer();
+  await studentVoicePeer.setLocalDescription(answer);
+  sendVoiceSignal(fromId, studentVoicePeer.localDescription);
+}
+
+function createStudentVoicePeer(targetId) {
+  const peer = new RTCPeerConnection(voicePeerConfig);
+  peer.addTransceiver("audio", { direction: "sendrecv" });
+
+  peer.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendVoiceSignal(targetId, event.candidate);
+    }
+  };
+
+  peer.ontrack = (event) => {
+    attachRemoteVoice("teacher", event.streams[0], "Teacher");
+  };
+
+  peer.onconnectionstatechange = () => {
+    if (["failed", "closed", "disconnected"].includes(peer.connectionState)) {
+      setCallStatus("Voice reconnecting");
+    }
+  };
+
+  return peer;
+}
+
+function sendVoiceSignal(targetId, signal) {
+  socket.emit("voice-signal", {
+    targetId,
+    signal
+  });
+}
+
+function attachRemoteVoice(id, stream, label) {
+  if (!stream) return;
+
+  let audio = remoteVoiceAudios.get(id);
+  if (!audio) {
+    audio = document.createElement("audio");
+    audio.autoplay = true;
+    audio.playsInline = true;
+    audio.dataset.voiceLabel = label;
+    audio.style.display = "none";
+    document.body.appendChild(audio);
+    remoteVoiceAudios.set(id, audio);
+  }
+
+  audio.srcObject = stream;
+  audio.play?.().catch(() => {
+    setCallStatus("Tap unmute to hear call");
+  });
+}
+
+async function addVoiceIceCandidate(id, peer, candidate) {
+  if (peer.remoteDescription?.type) {
+    await peer.addIceCandidate(candidate);
+    return;
+  }
+
+  const pending = pendingVoiceCandidates.get(id) || [];
+  pending.push(candidate);
+  pendingVoiceCandidates.set(id, pending);
+}
+
+async function flushPendingVoiceCandidates(id, peer) {
+  const pending = pendingVoiceCandidates.get(id) || [];
+  if (pending.length === 0) return;
+
+  pendingVoiceCandidates.delete(id);
+
+  for (const candidate of pending) {
+    await peer.addIceCandidate(candidate);
+  }
+}
+
+function setLocalVoiceMuted(muted) {
+  localVoiceStream?.getAudioTracks().forEach((track) => {
+    track.enabled = !muted;
+  });
+}
+
+function stopVoiceCall(notifyServer = false) {
+  if (notifyServer && role === "teacher") {
+    socket.emit("voice-call-end");
+  }
+
+  teacherVoicePeers.forEach((peer, studentId) => closeTeacherVoicePeer(studentId));
+  teacherVoicePeers.clear();
+
+  if (studentVoicePeer) {
+    studentVoicePeer.close();
+    studentVoicePeer = null;
+  }
+
+  remoteVoiceAudios.forEach((audio) => {
+    audio.srcObject = null;
+    audio.remove();
+  });
+  remoteVoiceAudios.clear();
+  pendingVoiceCandidates.clear();
+
+  localVoiceStream?.getTracks().forEach((track) => track.stop());
+  localVoiceStream = null;
+  teacherSocketId = null;
+  voiceCallActive = false;
+  studentVoiceJoined = false;
+  studentMuted = true;
+
+  if (role === "student") {
+    studentCallBar?.classList.add("call-hidden");
+    if (studentMuteToggleButton) {
+      studentMuteToggleButton.disabled = true;
+    }
+    updateStudentMuteButton();
+  }
+
+  updateTeacherCallButtons();
+  setCallStatus("Voice off");
+}
+
+function closeTeacherVoicePeer(studentId) {
+  const peer = teacherVoicePeers.get(studentId);
+  if (peer) {
+    peer.close();
+    teacherVoicePeers.delete(studentId);
+  }
+
+  const audio = remoteVoiceAudios.get(studentId);
+  if (audio) {
+    audio.srcObject = null;
+    audio.remove();
+    remoteVoiceAudios.delete(studentId);
+  }
+
+  if (role === "teacher" && voiceCallActive) {
+    setCallStatus(`Voice connected (${teacherVoicePeers.size})`);
+  }
+}
+
+function updateTeacherCallButtons() {
+  if (startCallButton) {
+    startCallButton.disabled = voiceCallActive;
+  }
+
+  if (endCallButton) {
+    endCallButton.disabled = !voiceCallActive;
+  }
+}
+
+function updateStudentMuteButton() {
+  if (!studentMuteToggleButton) return;
+
+  const icon = studentMuted ? "&#128263;" : "&#128266;";
+  const label = studentMuted ? "Unmute" : "Mute";
+  studentMuteToggleButton.innerHTML = `<span class="tool-icon" aria-hidden="true">${icon}</span><span>${label}</span>`;
+  studentMuteToggleButton.classList.toggle("active", !studentMuted);
+}
+
+function setCallStatus(message) {
+  if (callStatus) {
+    callStatus.textContent = message;
+  }
+}
 
 function makeDrawData(x, y, type = "move") {
   return {

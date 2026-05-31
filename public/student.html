@@ -9,6 +9,11 @@
 
 <div id="main">
 
+  <div id="studentCallBar" class="call-bar call-hidden">
+    <span id="callStatus" class="call-status">Voice off</span>
+    <button id="studentMuteToggle" onclick="toggleStudentMute()" disabled title="Mute or unmute"><span class="tool-icon" aria-hidden="true">&#128263;</span><span>Unmute</span></button>
+  </div>
+
   <canvas id="board"></canvas>
 
   <div id="chatContainer">

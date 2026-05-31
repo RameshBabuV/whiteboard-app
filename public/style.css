@@ -96,6 +96,72 @@ body {
   cursor: not-allowed;
 }
 
+.call-status {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.teacher-call-box {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr);
+  gap: 6px;
+  align-items: stretch;
+  padding: 8px;
+  border: 2px solid #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+}
+
+.teacher-call-box button {
+  width: 100%;
+  height: 34px;
+  justify-content: center;
+}
+
+.teacher-call-box .call-status {
+  min-height: 16px;
+  max-width: 130px;
+  padding: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+  background: #2c3e50;
+  box-sizing: border-box;
+}
+
+.call-bar button {
+  height: 32px;
+  border: none;
+  padding: 0 12px;
+  background: #ffffff;
+  color: #111;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.call-bar button.active {
+  background: #22c55e;
+  color: #ffffff;
+}
+
+.call-hidden {
+  display: none;
+}
+
 .tool-icon {
   width: 18px;
   min-width: 18px;
@@ -311,6 +377,28 @@ footer {
   #toolbar {
     padding: 6px;
     gap: 6px;
+  }
+
+  .call-status {
+    font-size: 13px;
+  }
+
+  .teacher-call-box {
+    grid-template-columns: minmax(118px, 1fr);
+    padding: 6px;
+  }
+
+  .teacher-call-box button {
+    height: 34px;
+  }
+
+  .teacher-call-box .call-status {
+    max-width: 118px;
+  }
+
+  .call-bar {
+    min-height: 40px;
+    padding: 5px 8px;
   }
 
   .toolbar-row {
