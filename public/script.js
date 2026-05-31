@@ -2,6 +2,7 @@ const socket = io();
 
 const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
+const boardResizeHandle = document.getElementById("boardResizeHandle");
 const boardTextEditor = document.getElementById("boardTextEditor");
 const fontFamilyInput = document.getElementById("fontFamily");
 const fontSizeInput = document.getElementById("fontSize");
@@ -43,6 +44,12 @@ let boardEvents = [];
 let undoStack = [];
 let redoStack = [];
 const maxHistoryItems = 50;
+const params = new URLSearchParams(window.location.search);
+const room = params.get("room") || "python";
+
+const role = window.location.pathname.includes("teacher")
+  ? "teacher"
+  : "student";
 const voicePeerConfig = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -57,12 +64,17 @@ function resizeCanvas() {
   redrawBoard();
 }
 
-const params = new URLSearchParams(window.location.search);
-const room = params.get("room") || "python";
+function applySavedBoardHeight() {
+  const savedHeight = Number(localStorage.getItem(getBoardHeightStorageKey()));
+  if (!Number.isFinite(savedHeight) || savedHeight <= 0) return;
 
-const role = window.location.pathname.includes("teacher")
-  ? "teacher"
-  : "student";
+  const bounds = getBoardHeightBounds();
+  setBoardDisplayHeight(clamp(savedHeight, bounds.min, bounds.max));
+}
+
+function getBoardHeightStorageKey() {
+  return `whiteboard:${role}:${room}:boardHeight`;
+}
 
 let drawing = false;
 let currentStrokeId = null;
@@ -78,6 +90,7 @@ let shapeInteraction = null;
 let selectedBoardObjectId = null;
 let boardObjectInteraction = null;
 let moveMode = false;
+let boardResizeInteraction = null;
 let voiceCallActive = false;
 let localVoiceStream = null;
 let teacherSocketId = null;
@@ -123,8 +136,10 @@ toolSelect?.addEventListener("dblclick", () => {
 });
 
 window.addEventListener("resize", resizeCanvas);
+boardResizeHandle?.addEventListener("pointerdown", startBoardResize);
 
 updateToolbarState();
+applySavedBoardHeight();
 resizeCanvas();
 socket.emit("joinRoom", room);
 
@@ -459,6 +474,67 @@ function makeDrawData(x, y, type = "move") {
     eraser: tool === "eraser",
     lineWidth: tool === "eraser" ? 18 : 3,
     strokeId: currentStrokeId
+  };
+}
+
+function startBoardResize(event) {
+  if (!boardResizeHandle) return;
+
+  event.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  boardResizeInteraction = {
+    startY: event.clientY,
+    startHeight: rect.height
+  };
+  boardResizeHandle.classList.add("resizing");
+  document.body.classList.add("board-resizing");
+  boardResizeHandle.setPointerCapture?.(event.pointerId);
+  window.addEventListener("pointermove", updateBoardResize);
+  window.addEventListener("pointerup", stopBoardResize);
+  window.addEventListener("pointercancel", stopBoardResize);
+}
+
+function updateBoardResize(event) {
+  if (!boardResizeInteraction) return;
+
+  const deltaY = event.clientY - boardResizeInteraction.startY;
+  const bounds = getBoardHeightBounds();
+  const nextHeight = clamp(boardResizeInteraction.startHeight + deltaY, bounds.min, bounds.max);
+  setBoardDisplayHeight(nextHeight);
+  resizeCanvas();
+}
+
+function stopBoardResize() {
+  if (!boardResizeInteraction) return;
+
+  const height = canvas.getBoundingClientRect().height;
+  localStorage.setItem(getBoardHeightStorageKey(), String(Math.round(height)));
+  boardResizeInteraction = null;
+  boardResizeHandle?.classList.remove("resizing");
+  document.body.classList.remove("board-resizing");
+  window.removeEventListener("pointermove", updateBoardResize);
+  window.removeEventListener("pointerup", stopBoardResize);
+  window.removeEventListener("pointercancel", stopBoardResize);
+}
+
+function setBoardDisplayHeight(height) {
+  canvas.style.flex = `0 0 ${height}px`;
+  canvas.style.height = `${height}px`;
+}
+
+function getBoardHeightBounds() {
+  const mainHeight = document.getElementById("main")?.getBoundingClientRect().height || window.innerHeight;
+  const toolbarHeight = document.getElementById("toolbar")?.getBoundingClientRect().height || 0;
+  const callBarHeight = studentCallBar && !studentCallBar.classList.contains("call-hidden")
+    ? studentCallBar.getBoundingClientRect().height
+    : 0;
+  const chatHeight = document.getElementById("chatContainer")?.getBoundingClientRect().height || 0;
+  const handleHeight = boardResizeHandle?.getBoundingClientRect().height || 0;
+  const availableHeight = mainHeight - toolbarHeight - callBarHeight - chatHeight - handleHeight;
+
+  return {
+    min: 180,
+    max: Math.max(180, availableHeight)
   };
 }
 

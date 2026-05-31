@@ -14,10 +14,15 @@ body {
 
 #toolbar {
   background: #2c3e50;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "primary call"
+    "secondary call";
+  column-gap: 10px;
+  row-gap: 6px;
+  align-items: center;
 }
 
 .toolbar-row {
@@ -26,6 +31,14 @@ body {
   align-items: center;
   overflow-x: auto;
   white-space: nowrap;
+}
+
+.toolbar-primary {
+  grid-area: primary;
+}
+
+.toolbar-secondary {
+  grid-area: secondary;
 }
 
 .toolbar-row button,
@@ -104,6 +117,7 @@ body {
 }
 
 .teacher-call-box {
+  grid-area: call;
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: minmax(130px, 1fr);
@@ -189,12 +203,47 @@ body {
 
 canvas {
   flex: 1;
+  flex-basis: auto;
   min-height: 0;
   width: 100%;
   border: 2px solid #000;
   box-sizing: border-box;
   touch-action: none;
   display: block;
+}
+
+.board-resize-handle {
+  flex: 0 0 10px;
+  height: 10px;
+  background: #d7dee8;
+  border-top: 1px solid #aab4c0;
+  border-bottom: 1px solid #aab4c0;
+  box-sizing: border-box;
+  cursor: ns-resize;
+  position: relative;
+  touch-action: none;
+}
+
+.board-resize-handle::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 72px;
+  height: 3px;
+  border-top: 1px solid #64748b;
+  border-bottom: 1px solid #64748b;
+  transform: translate(-50%, -50%);
+}
+
+.board-resize-handle:hover,
+.board-resize-handle.resizing {
+  background: #cbd5e1;
+}
+
+body.board-resizing {
+  cursor: ns-resize;
+  user-select: none;
 }
 
 #boardTextEditor {
@@ -383,8 +432,19 @@ footer {
     font-size: 13px;
   }
 
+  #toolbar {
+    padding: 6px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "primary"
+      "secondary"
+      "call";
+    row-gap: 6px;
+  }
+
   .teacher-call-box {
     grid-template-columns: minmax(118px, 1fr);
+    justify-self: start;
     padding: 6px;
   }
 

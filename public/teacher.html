@@ -10,7 +10,7 @@
 <div id="main">
 
   <div id="toolbar">
-    <div class="toolbar-row">
+    <div class="toolbar-row toolbar-primary">
       <div class="color-stack" title="Front and background colors">
         <input type="color" id="backgroundColor" value="#ffffff" title="Background color">
         <input type="color" id="color" title="Drawing color">
@@ -45,14 +45,15 @@
       <button id="redoBoard" onclick="redoBoard()" disabled title="Redo"><span class="tool-icon" aria-hidden="true">&#8631;</span><span>Redo</span></button>
       <button onclick="clearBoard()" title="Clear"><span class="tool-icon" aria-hidden="true">&#9003;</span><span>Clear</span></button>
       <button onclick="saveBoard()" title="Save"><span class="tool-icon" aria-hidden="true">&#8681;</span><span>Save</span></button>
-      <div class="teacher-call-box">
-        <button id="startCall" onclick="startVoiceCall()" title="Connect Voice"><span class="tool-icon" aria-hidden="true">&#9742;</span><span>Connect</span></button>
-        <button id="endCall" onclick="endVoiceCall()" disabled title="Disconnect Voice"><span class="tool-icon" aria-hidden="true">&#9743;</span><span>Disconnect</span></button>
-        <span id="callStatus" class="call-status">Voice off</span>
-      </div>
     </div>
 
-    <div class="toolbar-row">
+    <div class="teacher-call-box">
+      <button id="startCall" onclick="startVoiceCall()" title="Connect Voice"><span class="tool-icon" aria-hidden="true">&#9742;</span><span>Connect</span></button>
+      <button id="endCall" onclick="endVoiceCall()" disabled title="Disconnect Voice"><span class="tool-icon" aria-hidden="true">&#9743;</span><span>Disconnect</span></button>
+      <span id="callStatus" class="call-status">Voice off</span>
+    </div>
+
+    <div class="toolbar-row toolbar-secondary">
       <select id="fontFamily">
         <option value="Arial">Arial</option>
         <option value="Arial Black">Arial Black</option>
@@ -111,6 +112,7 @@
   </div>
 
   <canvas id="board"></canvas>
+  <div id="boardResizeHandle" class="board-resize-handle" title="Drag to resize whiteboard"></div>
   <textarea id="boardTextEditor" placeholder="Paste or type here..."></textarea>
 
   <div id="chatContainer">
