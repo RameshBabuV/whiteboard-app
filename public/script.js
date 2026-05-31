@@ -640,6 +640,10 @@ window.toggleScreenSharePermission = function () {
 };
 
 function canStartScreenShare() {
+  if (!isScreenShareSupported()) {
+    return false;
+  }
+
   if (role === "teacher") {
     return screenSharePermissionEnabled && connectedStudents.length > 0;
   }
@@ -712,6 +716,12 @@ function renderStudentRadioList() {
 }
 
 window.startScreenShare = async function () {
+  if (!isScreenShareSupported()) {
+    setScreenShareStatus("Screen share is not supported on this device");
+    updateScreenShareButtons();
+    return;
+  }
+
   if (!canStartScreenShare()) {
     setScreenShareStatus(role === "teacher" && screenSharePermissionEnabled
       ? "Connect a student first"
@@ -742,7 +752,7 @@ window.startScreenShare = async function () {
   } catch (error) {
     console.error("Unable to share screen:", error);
     localScreenStream = null;
-    setScreenShareStatus("Screen permission needed");
+    setScreenShareStatus(getScreenShareErrorMessage(error));
     updateScreenShareButtons();
   }
 };
@@ -911,6 +921,10 @@ function updateScreenShareButtons() {
     setScreenShareStatus("Connect a student first");
   }
 
+  if (!isScreenShareSupported() && shouldShowPanel && !localScreenStream) {
+    setScreenShareStatus("Screen share is not supported on this device");
+  }
+
   if (shareScreenButton) {
     shareScreenButton.disabled = !canShare || Boolean(localScreenStream) || (screenShareActive && screenSharerId !== socket.id);
   }
@@ -924,6 +938,30 @@ function setScreenShareStatus(message) {
   if (screenShareStatus) {
     screenShareStatus.textContent = message;
   }
+}
+
+function isScreenShareSupported() {
+  return Boolean(navigator.mediaDevices?.getDisplayMedia) && window.isSecureContext;
+}
+
+function getScreenShareErrorMessage(error) {
+  if (!window.isSecureContext) {
+    return "Screen share requires HTTPS";
+  }
+
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    return "Screen share is not supported on this device";
+  }
+
+  if (error?.name === "NotAllowedError") {
+    return "Screen share was blocked or cancelled";
+  }
+
+  if (error?.name === "NotFoundError") {
+    return "No screen source available";
+  }
+
+  return "Screen permission needed";
 }
 
 function makeDrawData(x, y, type = "move") {
