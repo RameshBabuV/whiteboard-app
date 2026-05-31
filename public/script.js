@@ -270,11 +270,19 @@ function createTeacherVoicePeer(studentId, name = "Student") {
   };
 
   peer.ontrack = (event) => {
-    attachRemoteVoice(studentId, event.streams[0], name);
+    const stream = event.streams[0] || new MediaStream([event.track]);
+    attachRemoteVoice(studentId, stream, name);
+    event.track.onunmute = () => {
+      attachRemoteVoice(studentId, stream, name);
+    };
   };
 
   peer.onconnectionstatechange = () => {
-    if (["failed", "closed", "disconnected"].includes(peer.connectionState)) {
+    if (peer.connectionState === "connected") {
+      setCallStatus(`Voice connected (${teacherVoicePeers.size})`);
+    }
+
+    if (["failed", "closed"].includes(peer.connectionState)) {
       closeTeacherVoicePeer(studentId);
     }
   };
@@ -312,11 +320,19 @@ function createStudentVoicePeer(targetId) {
   };
 
   peer.ontrack = (event) => {
-    attachRemoteVoice("teacher", event.streams[0], "Teacher");
+    const stream = event.streams[0] || new MediaStream([event.track]);
+    attachRemoteVoice("teacher", stream, "Teacher");
+    event.track.onunmute = () => {
+      attachRemoteVoice("teacher", stream, "Teacher");
+    };
   };
 
   peer.onconnectionstatechange = () => {
-    if (["failed", "closed", "disconnected"].includes(peer.connectionState)) {
+    if (peer.connectionState === "connected") {
+      setCallStatus(studentMuted ? "Muted" : "Unmuted");
+    }
+
+    if (["failed", "closed"].includes(peer.connectionState)) {
       setCallStatus("Voice reconnecting");
     }
   };
@@ -346,9 +362,15 @@ function attachRemoteVoice(id, stream, label) {
   }
 
   audio.srcObject = stream;
-  audio.play?.().catch(() => {
-    setCallStatus("Tap unmute to hear call");
-  });
+  audio.muted = false;
+  audio.volume = 1;
+
+  const playPromise = audio.play?.();
+  if (playPromise) {
+    playPromise.catch(() => {
+      setCallStatus(role === "teacher" ? "Browser blocked speaker" : "Tap unmute to hear call");
+    });
+  }
 }
 
 async function setStudentAudioTrack(track) {
