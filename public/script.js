@@ -95,7 +95,6 @@ let voiceCallActive = false;
 let localVoiceStream = null;
 let teacherSocketId = null;
 let studentVoicePeer = null;
-let studentAudioSender = null;
 let studentVoiceJoined = false;
 let studentMuted = true;
 const teacherVoicePeers = new Map();
@@ -263,6 +262,12 @@ function createTeacherVoicePeer(studentId, name = "Student") {
     peer.addTrack(track, localVoiceStream);
   });
 
+  peer.getTransceivers().forEach((transceiver) => {
+    if (transceiver.receiver?.track?.kind === "audio" || transceiver.sender?.track?.kind === "audio") {
+      transceiver.direction = "sendrecv";
+    }
+  });
+
   peer.onicecandidate = (event) => {
     if (event.candidate) {
       sendVoiceSignal(studentId, event.candidate);
@@ -294,11 +299,7 @@ function createTeacherVoicePeer(studentId, name = "Student") {
 async function answerTeacherVoiceOffer(fromId, offer) {
   teacherSocketId = fromId;
   if (!studentVoicePeer) {
-    studentVoicePeer = createStudentVoicePeer(fromId);
-  }
-
-  if (localVoiceStream) {
-    await setStudentAudioTrack(localVoiceStream.getAudioTracks()[0]);
+    studentVoicePeer = createStudentVoicePeer(fromId, localVoiceStream);
   }
 
   await studentVoicePeer.setRemoteDescription(offer);
@@ -310,8 +311,18 @@ async function answerTeacherVoiceOffer(fromId, offer) {
 
 function createStudentVoicePeer(targetId) {
   const peer = new RTCPeerConnection(voicePeerConfig);
-  const transceiver = peer.addTransceiver("audio", { direction: "sendrecv" });
-  studentAudioSender = transceiver.sender;
+
+  if (localVoiceStream) {
+    localVoiceStream.getAudioTracks().forEach((track) => {
+      peer.addTrack(track, localVoiceStream);
+    });
+  }
+
+  peer.getTransceivers().forEach((transceiver) => {
+    if (transceiver.receiver?.track?.kind === "audio" || transceiver.sender?.track?.kind === "audio") {
+      transceiver.direction = transceiver.sender?.track ? "sendrecv" : "recvonly";
+    }
+  });
 
   peer.onicecandidate = (event) => {
     if (event.candidate) {
@@ -373,23 +384,6 @@ function attachRemoteVoice(id, stream, label) {
   }
 }
 
-async function setStudentAudioTrack(track) {
-  if (!track) return;
-
-  if (!studentVoicePeer && teacherSocketId) {
-    studentVoicePeer = createStudentVoicePeer(teacherSocketId);
-  }
-
-  if (studentAudioSender) {
-    await studentAudioSender.replaceTrack(track);
-    return;
-  }
-
-  if (studentVoicePeer) {
-    studentAudioSender = studentVoicePeer.addTrack(track, localVoiceStream);
-  }
-}
-
 async function addVoiceIceCandidate(id, peer, candidate) {
   if (peer.remoteDescription?.type) {
     await peer.addIceCandidate(candidate);
@@ -430,7 +424,6 @@ function stopVoiceCall(notifyServer = false) {
     studentVoicePeer.close();
     studentVoicePeer = null;
   }
-  studentAudioSender = null;
 
   remoteVoiceAudios.forEach((audio) => {
     audio.srcObject = null;
