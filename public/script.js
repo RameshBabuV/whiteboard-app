@@ -95,6 +95,7 @@ let voiceCallActive = false;
 let localVoiceStream = null;
 let teacherSocketId = null;
 let studentVoicePeer = null;
+let studentAudioSender = null;
 let studentVoiceJoined = false;
 let studentMuted = true;
 const teacherVoicePeers = new Map();
@@ -289,12 +290,7 @@ async function answerTeacherVoiceOffer(fromId, offer) {
   }
 
   if (localVoiceStream) {
-    localVoiceStream.getTracks().forEach((track) => {
-      const alreadyAdded = studentVoicePeer.getSenders().some((sender) => sender.track === track);
-      if (!alreadyAdded) {
-        studentVoicePeer.addTrack(track, localVoiceStream);
-      }
-    });
+    await setStudentAudioTrack(localVoiceStream.getAudioTracks()[0]);
   }
 
   await studentVoicePeer.setRemoteDescription(offer);
@@ -306,7 +302,8 @@ async function answerTeacherVoiceOffer(fromId, offer) {
 
 function createStudentVoicePeer(targetId) {
   const peer = new RTCPeerConnection(voicePeerConfig);
-  peer.addTransceiver("audio", { direction: "sendrecv" });
+  const transceiver = peer.addTransceiver("audio", { direction: "sendrecv" });
+  studentAudioSender = transceiver.sender;
 
   peer.onicecandidate = (event) => {
     if (event.candidate) {
@@ -354,6 +351,23 @@ function attachRemoteVoice(id, stream, label) {
   });
 }
 
+async function setStudentAudioTrack(track) {
+  if (!track) return;
+
+  if (!studentVoicePeer && teacherSocketId) {
+    studentVoicePeer = createStudentVoicePeer(teacherSocketId);
+  }
+
+  if (studentAudioSender) {
+    await studentAudioSender.replaceTrack(track);
+    return;
+  }
+
+  if (studentVoicePeer) {
+    studentAudioSender = studentVoicePeer.addTrack(track, localVoiceStream);
+  }
+}
+
 async function addVoiceIceCandidate(id, peer, candidate) {
   if (peer.remoteDescription?.type) {
     await peer.addIceCandidate(candidate);
@@ -394,6 +408,7 @@ function stopVoiceCall(notifyServer = false) {
     studentVoicePeer.close();
     studentVoicePeer = null;
   }
+  studentAudioSender = null;
 
   remoteVoiceAudios.forEach((audio) => {
     audio.srcObject = null;
@@ -518,8 +533,18 @@ function stopBoardResize() {
 }
 
 function setBoardDisplayHeight(height) {
-  canvas.style.flex = `0 0 ${height}px`;
-  canvas.style.height = `${height}px`;
+  const chatContainer = document.getElementById("chatContainer");
+  const bounds = getBoardHeightBounds();
+  const nextHeight = clamp(height, bounds.min, bounds.max);
+  const nextChatHeight = Math.max(bounds.minChat, bounds.available - nextHeight);
+
+  canvas.style.flex = `0 0 ${nextHeight}px`;
+  canvas.style.height = `${nextHeight}px`;
+
+  if (chatContainer) {
+    chatContainer.style.flex = `0 0 ${nextChatHeight}px`;
+    chatContainer.style.height = `${nextChatHeight}px`;
+  }
 }
 
 function getBoardHeightBounds() {
@@ -528,13 +553,15 @@ function getBoardHeightBounds() {
   const callBarHeight = studentCallBar && !studentCallBar.classList.contains("call-hidden")
     ? studentCallBar.getBoundingClientRect().height
     : 0;
-  const chatHeight = document.getElementById("chatContainer")?.getBoundingClientRect().height || 0;
   const handleHeight = boardResizeHandle?.getBoundingClientRect().height || 0;
-  const availableHeight = mainHeight - toolbarHeight - callBarHeight - chatHeight - handleHeight;
+  const minChat = window.matchMedia("(max-width: 700px)").matches ? 72 : 90;
+  const availableHeight = Math.max(260, mainHeight - toolbarHeight - callBarHeight - handleHeight);
 
   return {
     min: 180,
-    max: Math.max(180, availableHeight)
+    max: Math.max(180, availableHeight - minChat),
+    minChat,
+    available: availableHeight
   };
 }
 
